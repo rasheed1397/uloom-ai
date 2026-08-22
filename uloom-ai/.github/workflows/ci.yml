@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: uloom
+          POSTGRES_PASSWORD: uloom
+          POSTGRES_DB: uloom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uloom"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://uloom:uloom@localhost:5432/uloom
+      SECRET_KEY: ci-test-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy app
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Test (pytest, NFR-006 coverage gate)
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80

@@ -1,0 +1,29 @@
+[project]
+name = "uloom-ai"
+version = "0.1.0"
+description = "Uloom AI - modular RAG platform (v1: document intelligence)"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# UP042 (prefer enum.StrEnum) intentionally ignored: `str, Enum` is kept for
+# broader compatibility with libraries that don't special-case StrEnum yet.
+ignore = ["UP042"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = true
+exclude = ["alembic/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
