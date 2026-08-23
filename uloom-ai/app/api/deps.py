@@ -19,9 +19,12 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.user_repository import UserRepository
+from app.services.admin_service import AdminService
 from app.services.ai_service.factory import get_chat_provider, get_embedding_provider
 from app.services.auth_service import AuthService
 from app.services.conversation_service import ConversationService
+from app.services.document_service import DocumentService
+from app.services.storage.factory import get_storage_backend
 from app.services.vector_service import VectorService
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
@@ -49,8 +52,11 @@ def get_message_repository(session: SessionDep) -> MessageRepository:
     return MessageRepository(session)
 
 
-def get_auth_service(users: Annotated[UserRepository, Depends(get_user_repository)]) -> AuthService:
-    return AuthService(users)
+def get_auth_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AuthService:
+    return AuthService(users, admin_bootstrap_emails=settings.admin_bootstrap_emails)
 
 
 def get_vector_service(chunks: Annotated[ChunkRepository, Depends(get_chunk_repository)]) -> VectorService:
@@ -64,6 +70,30 @@ def get_conversation_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ConversationService:
     return ConversationService(conversations, messages, vector_service, get_chat_provider(), settings)
+
+
+def get_document_service(
+    documents: Annotated[DocumentRepository, Depends(get_document_repository)],
+    chunks: Annotated[ChunkRepository, Depends(get_chunk_repository)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> DocumentService:
+    return DocumentService(
+        document_repository=documents,
+        chunk_repository=chunks,
+        embedding_provider=get_embedding_provider(),
+        storage=get_storage_backend(),
+        allowed_mime_types=settings.allowed_upload_mime_types,
+        max_upload_size_bytes=settings.max_upload_size_mb * 1024 * 1024,
+        chunk_token_size=settings.chunk_token_size,
+    )
+
+
+def get_admin_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    documents: Annotated[DocumentRepository, Depends(get_document_repository)],
+    document_service: Annotated[DocumentService, Depends(get_document_service)],
+) -> AdminService:
+    return AdminService(users, documents, document_service)
 
 
 async def get_current_user(
@@ -85,7 +115,7 @@ async def get_current_user(
     except ValueError:
         raise credentials_error from None
     user = await users.get_by_id(user_id)
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_error
     return user
 

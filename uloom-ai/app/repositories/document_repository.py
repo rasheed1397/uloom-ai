@@ -18,3 +18,11 @@ class DocumentRepository(BaseRepository):
     async def list_for_owner(self, owner_id: uuid.UUID) -> list[Document]:
         result = await self._session.execute(select(Document).where(Document.owner_id == owner_id))
         return list(result.scalars().all())
+
+    async def list_all(self) -> list[Document]:
+        result = await self._session.execute(select(Document))
+        return list(result.scalars().all())
+
+    async def delete(self, document: Document) -> None:
+        await self._session.delete(document)
+        await self._session.flush()
