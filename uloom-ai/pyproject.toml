@@ -23,6 +23,12 @@ exclude = ["alembic/"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Session-scoped loop: app.core.db's async engine/connection pool is created
+# once at import time, so it must be used from a single event loop for the
+# whole test run rather than a fresh loop per test function (the default),
+# which breaks asyncpg with "another operation is in progress".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 [build-system]
 requires = ["setuptools>=68"]
