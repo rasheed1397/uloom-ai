@@ -112,3 +112,37 @@ Copy `.env.example` to `.env`. Required to do anything beyond `/health`:
 `REDIS_URL` is defined in config and docker-compose but nothing in the
 codebase actually uses Redis yet — it's reserved for future
 caching/session/queue state per SRS Section 7.
+
+## Frontend (added 2026-08-23)
+
+`frontend/` — React + TypeScript + Vite, plain `fetch` (see
+`frontend/src/api/client.ts`), no UI library, plain CSS. See
+`frontend/README.md` for structure/setup detail; this section covers what
+that README doesn't.
+
+**Depends on two other branches/PRs to actually work against a real
+backend**, since this branch was cut from `main` before either landed:
+- `feature/document-conversation-admin-services` (PR #3) — without it,
+  `/documents`, `/conversations`, and `/admin/*` are all still stubs.
+- `feature/frontend-cors-support` (PR #4) — without it, the browser blocks
+  every request with a CORS error (no `Access-Control-Allow-Origin`
+  header). Confirmed live: the same login request that worked fine over
+  `curl` failed in the browser console with exactly this until CORS
+  middleware was added.
+
+If working on this branch standalone, merge or locally combine both first
+rather than debugging what looks like a broken frontend.
+
+**Node version:** the system-wide Node on the machine this was scaffolded
+on is v16.15.1 (EOL, too old for this Vite version — needs 20+). No
+nvm-windows install succeeded (its installer needs an interactive admin
+UAC prompt, which fails silently in a non-interactive session). Worked
+around with a portable Node 22 zip extracted to
+`%LOCALAPPDATA%\Programs\node-tools\node-v22.23.2-win-x64`, prepended to
+`PATH` for frontend commands only — the system Node is untouched. If a
+proper nvm/system Node upgrade happens later, this section can go.
+
+**Known gaps** (also listed in `frontend/README.md`): no tests, no document
+content/chunk viewer (status only), admin settings are read-only in the UI
+since `PATCH /admin/settings` isn't implemented on the backend (see PR #3's
+notes above on why).
