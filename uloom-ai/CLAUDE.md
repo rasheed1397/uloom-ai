@@ -80,17 +80,25 @@ Fully working:
   specifically so this works; a separate session there raced the commit and
   silently no-op'd in testing). Any failure marks the document `FAILED`
   with `status_detail` set (SRS Sec.9), never left stuck in `PROCESSING`.
-- `/conversations` (create, list) and `/conversations/{id}/messages` (ask)
-  — conversation creation was a real missing feature (not a deferred
-  decision) and is now wired up. `ask` checks the conversation belongs to
-  the caller (404 otherwise — previously *any* authenticated user could
-  post to *any* conversation ID) and scopes retrieval to the caller's own
-  documents via `DocumentService.list_for_owner` (previously always passed
-  an empty list, so every question silently returned "can't answer").
-  Provider failures (`ProviderError` and subtypes) degrade to a graceful
-  assistant message per SRS Sec.9, not a 500 - includes a real connection
-  failure case (`httpx.TransportError`, e.g. DNS/TLS failure) that
-  `GeminiAdapter` didn't map to `ProviderError` at all before; also
+- `/conversations` (create, list) and `/conversations/{id}/messages`
+  (`GET` history, `POST` ask) — conversation creation and the `GET` on
+  messages were real missing features (not deferred decisions), now wired
+  up. The Design doc's Section 4 API map calls for `GET` on the messages
+  resource ("retrieve message + citation history") and
+  `MessageRepository.list_for_conversation` already existed unused, but
+  there was no route for it. `ask`/`list_messages` both check the
+  conversation belongs to the caller (404 otherwise — previously *any*
+  authenticated user could post to *any* conversation ID) and `ask` scopes
+  retrieval to the caller's own documents via `DocumentService.list_for_owner`
+  (previously always passed an empty list, so every question silently
+  returned "can't answer"). `ask` now persists the user's own question as a
+  `Message` too, not just the assistant's reply - previously `GET
+  .../messages` would have shown one-sided assistant-only monologues, which
+  only became obvious once something (the frontend) actually needed to
+  render history. Provider failures (`ProviderError` and subtypes) degrade
+  to a graceful assistant message per SRS Sec.9, not a 500 - includes a real
+  connection failure case (`httpx.TransportError`, e.g. DNS/TLS failure)
+  that `GeminiAdapter` didn't map to `ProviderError` at all before; also
   broadened `ClientError` to `APIError` there so 5xx responses aren't
   silently unmapped either.
 - `/admin/*` — reachable now via a bootstrap mechanism (see below).
