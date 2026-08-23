@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # time; ongoing role changes go through PATCH /admin/users/{id}. ---
     admin_bootstrap_emails: str = ""
 
+    # --- CORS (frontend is a separate origin - SRS Sec.1.3.2 assumes a
+    # browser client). Vite's default dev port is the local default; set
+    # CORS_ALLOWED_ORIGINS explicitly for staging/prod. ---
+    cors_allowed_origins: tuple[str, ...] = ("http://localhost:5173",)
+
 
 @lru_cache
 def get_settings() -> Settings:
