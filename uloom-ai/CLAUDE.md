@@ -127,6 +127,18 @@ test log. `pypdf`, `python-docx`, `python-multipart`, and `httpx` (now a
 direct dependency, not just transitive via `google-genai`) were added to
 `requirements.txt`.
 
+**`GEMINI_CHAT_MODEL` was bumped from `gemini-2.5-flash` to
+`gemini-3.6-flash`** after the manual verification above initially caught
+the full upload → index → ask flow live: embeddings worked
+(`gemini-embedding-001` is fine), but chat generation returned a real 404
+from the Gemini API - `gemini-2.5-flash` is no longer available to new
+users. After the fix, ran the full RAG flow live end-to-end: a grounded
+question returned a correct answer with an accurate citation
+(chunk/document/source_location all matched), and an off-topic question
+correctly avoided hallucinating (though it still cited an irrelevant chunk
+- that's the pre-existing `SIMILARITY_THRESHOLD` gap noted above, not
+something this pass introduced).
+
 ## Verified, not yet run live
 
 - `ruff check .` and `mypy app` both pass clean.

@@ -24,7 +24,10 @@ class Settings(BaseSettings):
 
     # TODO:: Rename api key(s) and model(s) to be more generic, not provider specific. Unless the current approach is more aligned with best practices. Need to research and confirm.
     gemini_api_key: str = ""
-    gemini_chat_model: str = "gemini-2.5-flash"
+    # gemini-2.5-flash returns 404 for new users as of 2026-08 ("no longer
+    # available to new users... use models/gemini-3.6-flash") - confirmed
+    # live against the Gemini API, not just docs.
+    gemini_chat_model: str = "gemini-3.6-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
 
     # TODO:: May not be needed if provider agnostic approach to be researched above is adopted.
