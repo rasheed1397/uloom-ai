@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, get_conversation_service, get_document_service
+from app.models.conversation import Conversation
+from app.models.user import User
 from app.schemas.conversations import ConversationOut, CreateConversationRequest
 from app.services.conversation_service import ConversationService
 from app.services.document_service import DocumentService
@@ -45,6 +47,29 @@ async def list_conversations(
     return [ConversationOut.model_validate(c) for c in conversations]
 
 
+async def _get_owned_conversation(
+    conversation_id: uuid.UUID, user: User, conversation_service: ConversationService
+) -> Conversation:
+    # 404 rather than 403 for a conversation that exists but isn't yours, so
+    # the response doesn't reveal whether the ID exists at all (same
+    # rationale as the documents router's _authorize).
+    conversation = await conversation_service.get_by_id(conversation_id)
+    if conversation is None or conversation.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return conversation
+
+
+@router.get("/{conversation_id}/messages", response_model=list[MessageOut])
+async def list_messages(
+    conversation_id: uuid.UUID,
+    user: CurrentUser,
+    conversation_service: Annotated[ConversationService, Depends(get_conversation_service)],
+) -> list[MessageOut]:
+    await _get_owned_conversation(conversation_id, user, conversation_service)
+    messages = await conversation_service.list_messages(conversation_id)
+    return [MessageOut.model_validate(m) for m in messages]
+
+
 @router.post("/{conversation_id}/messages", response_model=MessageOut)
 async def ask(
     conversation_id: uuid.UUID,
@@ -53,9 +78,7 @@ async def ask(
     conversation_service: Annotated[ConversationService, Depends(get_conversation_service)],
     document_service: Annotated[DocumentService, Depends(get_document_service)],
 ) -> MessageOut:
-    conversation = await conversation_service.get_by_id(conversation_id)
-    if conversation is None or conversation.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    await _get_owned_conversation(conversation_id, user, conversation_service)
 
     # Scoped to documents the user owns; sharing (SRS Sec.10) isn't
     # implemented yet, so "owned" is the whole authorized set for now.

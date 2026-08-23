@@ -41,6 +41,9 @@ class ConversationService:
     async def get_by_id(self, conversation_id: uuid.UUID) -> Conversation | None:
         return await self._conversations.get_by_id(conversation_id)
 
+    async def list_messages(self, conversation_id: uuid.UUID) -> list[Message]:
+        return await self._messages.list_for_conversation(conversation_id)
+
     async def ask(
         self,
         conversation_id: uuid.UUID,
@@ -48,6 +51,13 @@ class ConversationService:
         question: str,
         owner_document_ids: list[uuid.UUID],
     ) -> Message:
+        # Persisted regardless of how the rest of this call goes (including
+        # the degraded-mode paths below), so GET .../messages reflects both
+        # sides of the conversation, not just assistant replies.
+        await self._messages.create(
+            Message(conversation_id=conversation_id, role=MessageRole.USER, content=question, citations=[])
+        )
+
         # SRS Sec.9 degraded-mode handling: a provider outage must surface as
         # a graceful assistant message, never an unhandled 500 or a hang.
         try:
