@@ -183,3 +183,33 @@ defaults in `app/core/config.py`):
   `/admin/*` endpoint, otherwise there's no way to become an admin.
 - `DOCUMENT_STORAGE_PATH` (default `./data/documents`), `MAX_UPLOAD_SIZE_MB`
   (default 25) — local storage backend config.
+
+## Frontend (added 2026-08-23)
+
+`frontend/` — React + TypeScript + Vite, plain `fetch` (see
+`frontend/src/api/client.ts`), no UI library, plain CSS. See
+`frontend/README.md` for structure/setup detail; this section covers what
+that README doesn't.
+
+Full click-through verified live in a real browser against this backend
+(login, documents, conversation history with citations, live chat, admin
+panel including a live enable/disable action) once PR #3 (document/
+conversation/admin) and PR #4 (CORS) — both merged now — were available.
+The only unverified piece is uploading via an actual OS file picker (the
+browser automation used couldn't drive native file dialogs); upload itself
+is thoroughly verified via `curl` in PR #3, including real Gemini
+embedding end-to-end.
+
+**Node version:** the system-wide Node on the machine this was scaffolded
+on is v16.15.1 (EOL, too old for this Vite version — needs 20+). No
+nvm-windows install succeeded (its installer needs an interactive admin
+UAC prompt, which fails silently in a non-interactive session). Worked
+around with a portable Node 22 zip extracted to
+`%LOCALAPPDATA%\Programs\node-tools\node-v22.23.2-win-x64`, prepended to
+`PATH` for frontend commands only — the system Node is untouched. If a
+proper nvm/system Node upgrade happens later, this section can go.
+
+**Known gaps** (also listed in `frontend/README.md`): no tests, no document
+content/chunk viewer (status only), admin settings are read-only in the UI
+since `PATCH /admin/settings` isn't implemented on the backend (see PR #3's
+notes above on why).
