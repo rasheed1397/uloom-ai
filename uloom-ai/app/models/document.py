@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,8 +30,13 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus), default=DocumentStatus.UPLOADED, nullable=False
+        Enum(DocumentStatus, values_callable=lambda cls: [e.value for e in cls]),
+        default=DocumentStatus.UPLOADED,
+        nullable=False,
     )
+    # Set when status is FAILED (Sec.9: "document marked failed with a
+    # visible status and reason"); None otherwise.
+    status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = created_at_col()
 
     owner: Mapped["User"] = relationship(back_populates="documents")  # noqa: F821

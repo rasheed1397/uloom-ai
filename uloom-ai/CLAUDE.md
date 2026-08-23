@@ -57,31 +57,95 @@ as history — don't treat them as current.
   `datetime.now(timezone.utc)`. Keep it that way unless you're sure the
   deployment target is 3.11+.
 
-## Implementation status (as of scaffold handoff)
+## Implementation status (updated 2026-08-23 — document/conversation/admin build-out)
 
 Fully working:
-- `/auth/register`, `/auth/login`, `/users/me` — real vertical slice:
-  register → hash password → issue JWT → authenticate subsequent requests.
+- `/auth/register`, `/auth/login`, `/users/me` — register → hash password →
+  issue JWT → authenticate subsequent requests. Disabled accounts
+  (`User.is_active`) are rejected at both login and on every subsequent
+  request via `get_current_user`, not just at login time.
+- `/documents` (upload, list, get, delete) — object storage backend
+  decision (Design Sec.6 open item) resolved to **local volume** for v1,
+  behind `app/services/storage/interfaces.py::StorageBackend` so an
+  S3-compatible backend can be swapped in later without touching
+  `DocumentService`. Upload returns 202 immediately (row + raw file
+  persisted); parsing (PDF/DOCX/Markdown/plain text via
+  `app/services/document_parsing.py`), token-range chunking
+  (`app/services/chunking.py`, tiktoken `cl100k_base` — loaded lazily, not
+  at import time, since it fetches its vocab file over the network on first
+  use) and embedding happen in `DocumentService.process()`, run as a
+  FastAPI `BackgroundTask` **on the same request-scoped session** as the
+  upload (see the comment in `documents.py::upload_document` — FastAPI
+  runs background tasks before a yield-dependency's post-yield/commit code
+  specifically so this works; a separate session there raced the commit and
+  silently no-op'd in testing). Any failure marks the document `FAILED`
+  with `status_detail` set (SRS Sec.9), never left stuck in `PROCESSING`.
+- `/conversations` (create, list) and `/conversations/{id}/messages`
+  (`GET` history, `POST` ask) — conversation creation and the `GET` on
+  messages were real missing features (not deferred decisions), now wired
+  up. The Design doc's Section 4 API map calls for `GET` on the messages
+  resource ("retrieve message + citation history") and
+  `MessageRepository.list_for_conversation` already existed unused, but
+  there was no route for it. `ask`/`list_messages` both check the
+  conversation belongs to the caller (404 otherwise — previously *any*
+  authenticated user could post to *any* conversation ID) and `ask` scopes
+  retrieval to the caller's own documents via `DocumentService.list_for_owner`
+  (previously always passed an empty list, so every question silently
+  returned "can't answer"). `ask` now persists the user's own question as a
+  `Message` too, not just the assistant's reply - previously `GET
+  .../messages` would have shown one-sided assistant-only monologues, which
+  only became obvious once something (the frontend) actually needed to
+  render history. Provider failures (`ProviderError` and subtypes) degrade
+  to a graceful assistant message per SRS Sec.9, not a 500 - includes a real
+  connection failure case (`httpx.TransportError`, e.g. DNS/TLS failure)
+  that `GeminiAdapter` didn't map to `ProviderError` at all before; also
+  broadened `ClientError` to `APIError` there so 5xx responses aren't
+  silently unmapped either.
+- `/admin/*` — reachable now via a bootstrap mechanism (see below).
+  `GET /admin/users`, `PATCH /admin/users/{id}` (role, `is_active`),
+  `GET /admin/documents`, `DELETE /admin/documents/{id}`, and
+  `GET /admin/settings` are implemented via `AdminService`.
+  **Deliberately still 501**: `PATCH /admin/settings` (FR-009 wants
+  retrieval-top-k/chunk-size adjustable "without a deployment", which needs
+  runtime-persisted config read by VectorService/ConversationService, not
+  the startup-time `Settings` object — a real schema + read-path change,
+  not a one-route fix) and AI provider credential rotation (would need a
+  managed secret store per NFR-004; storing keys in Postgres would
+  undermine that requirement rather than satisfy it).
 
-Stubbed on purpose (raises `NotImplementedError` / returns 501):
-- `/documents` (upload, list, get, delete) — blocked on the object storage
-  backend decision (Design Sec.6 open item: local volume vs. S3-compatible).
-  `DocumentService.upload_and_index` has the intended flow commented in.
-- `/admin/*` — stubbed; also currently unreachable since registration always
-  creates a `STANDARD` role user and there's no promotion path yet.
+**Admin bootstrap (FR-009 open item, now resolved):** the first admin(s)
+are created via `ADMIN_BOOTSTRAP_EMAILS` (comma-separated, checked at
+registration in `AuthService.register`) rather than any API-driven
+promotion path, since promotion needs an existing admin and this avoids
+that chicken-and-egg problem and any privilege-escalation surface. Ongoing
+role/active changes go through `PATCH /admin/users/{id}`.
 
-**Known gap, not an intentional stub:** there is no `POST /conversations`
-endpoint to create a conversation. `app/api/routers/conversations.py` only
-implements `POST /{conversation_id}/messages` (ask a question against an
-*existing* conversation). The Design doc's Section 4 resource table lists
-conversation creation, but it was never wired up. A `conversation_id`
-currently has to be inserted manually to exercise the ask-a-question flow.
-This should be treated as a small missing feature, not a deferred decision.
+Retrieval in `ConversationService.ask()` still returns whatever
+`VectorService` finds without filtering by `SIMILARITY_THRESHOLD` — see the
+`TODO` there. The threshold value itself is still an open item (needs eval
+against real query data) - unchanged by this pass.
 
-Retrieval in `ConversationService.ask()` returns whatever `VectorService`
-finds without filtering by `SIMILARITY_THRESHOLD` yet — see the `TODO` in
-`app/services/conversation_service.py`. The threshold value itself is also
-an open item (needs eval against real query data).
+**Not yet covered by automated tests.** Test coverage (PR #2, currently
+open/paused) predates this work and doesn't exercise any of it. Everything
+above was verified manually against a live Postgres+pgvector instance
+(register/login/disable, upload/list/get/delete across text/PDF/DOCX,
+conversation create/list/ask including the degraded-mode path, admin
+bootstrap/list/patch/delete) — see the PR description for the full manual
+test log. `pypdf`, `python-docx`, `python-multipart`, and `httpx` (now a
+direct dependency, not just transitive via `google-genai`) were added to
+`requirements.txt`.
+
+**`GEMINI_CHAT_MODEL` was bumped from `gemini-2.5-flash` to
+`gemini-3.6-flash`** after the manual verification above initially caught
+the full upload → index → ask flow live: embeddings worked
+(`gemini-embedding-001` is fine), but chat generation returned a real 404
+from the Gemini API - `gemini-2.5-flash` is no longer available to new
+users. After the fix, ran the full RAG flow live end-to-end: a grounded
+question returned a correct answer with an accurate citation
+(chunk/document/source_location all matched), and an off-topic question
+correctly avoided hallucinating (though it still cited an irrelevant chunk
+- that's the pre-existing `SIMILARITY_THRESHOLD` gap noted above, not
+something this pass introduced).
 
 ## Verified, not yet run live
 
@@ -112,3 +176,10 @@ Copy `.env.example` to `.env`. Required to do anything beyond `/health`:
 `REDIS_URL` is defined in config and docker-compose but nothing in the
 codebase actually uses Redis yet — it's reserved for future
 caching/session/queue state per SRS Section 7.
+
+New since the document/conversation/admin build-out, all optional (sane
+defaults in `app/core/config.py`):
+- `ADMIN_BOOTSTRAP_EMAILS` — comma-separated; set this to actually reach any
+  `/admin/*` endpoint, otherwise there's no way to become an admin.
+- `DOCUMENT_STORAGE_PATH` (default `./data/documents`), `MAX_UPLOAD_SIZE_MB`
+  (default 25) — local storage backend config.

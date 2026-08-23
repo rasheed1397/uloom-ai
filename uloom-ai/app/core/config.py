@@ -24,7 +24,10 @@ class Settings(BaseSettings):
 
     # TODO:: Rename api key(s) and model(s) to be more generic, not provider specific. Unless the current approach is more aligned with best practices. Need to research and confirm.
     gemini_api_key: str = ""
-    gemini_chat_model: str = "gemini-2.5-flash"
+    # gemini-2.5-flash returns 404 for new users as of 2026-08 ("no longer
+    # available to new users... use models/gemini-3.6-flash") - confirmed
+    # live against the Gemini API, not just docs.
+    gemini_chat_model: str = "gemini-3.6-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
 
     # TODO:: May not be needed if provider agnostic approach to be researched above is adopted.
@@ -40,6 +43,23 @@ class Settings(BaseSettings):
     # --- Auth (NFR-004) ---
     jwt_algorithm: str = "HS256"
     jwt_access_token_ttl_minutes: int = 30
+
+    # --- Document storage (FR-003/FR-004; Detailed Design Sec.5.2/6 open item,
+    # resolved to local volume for v1 - see StorageBackend for the swap point) ---
+    storage_backend: str = "local"
+    document_storage_path: str = "./data/documents"
+    max_upload_size_mb: int = 25
+    allowed_upload_mime_types: tuple[str, ...] = (
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/markdown",
+        "text/plain",
+    )
+
+    # --- Admin bootstrap (FR-009 open item: how the first Administrator is
+    # created). Comma-separated emails auto-promoted to ADMIN at registration
+    # time; ongoing role changes go through PATCH /admin/users/{id}. ---
+    admin_bootstrap_emails: str = ""
 
     # --- CORS (frontend is a separate origin - SRS Sec.1.3.2 assumes a
     # browser client). Vite's default dev port is the local default; set
