@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, String
+from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, created_at_col, uuid_pk
@@ -30,6 +30,7 @@ class User(Base):
         default=UserRole.STANDARD,
         nullable=False,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = created_at_col()
 
     documents: Mapped[list["Document"]] = relationship(back_populates="owner")  # noqa: F821

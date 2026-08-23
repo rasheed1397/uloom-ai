@@ -15,6 +15,7 @@ services:
         condition: service_started
     volumes:
       - ./app:/srv/app/app
+      - documents_data:/srv/app/data/documents
 
   db:
     image: pgvector/pgvector:pg16
@@ -39,3 +40,4 @@ services:
 
 volumes:
   db_data:
+  documents_data:

@@ -18,3 +18,7 @@ class UserRepository(BaseRepository):
         self._session.add(user)
         await self._session.flush()
         return user
+
+    async def list_all(self) -> list[User]:
+        result = await self._session.execute(select(User))
+        return list(result.scalars().all())

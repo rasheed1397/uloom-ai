@@ -41,6 +41,23 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_ttl_minutes: int = 30
 
+    # --- Document storage (FR-003/FR-004; Detailed Design Sec.5.2/6 open item,
+    # resolved to local volume for v1 - see StorageBackend for the swap point) ---
+    storage_backend: str = "local"
+    document_storage_path: str = "./data/documents"
+    max_upload_size_mb: int = 25
+    allowed_upload_mime_types: tuple[str, ...] = (
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/markdown",
+        "text/plain",
+    )
+
+    # --- Admin bootstrap (FR-009 open item: how the first Administrator is
+    # created). Comma-separated emails auto-promoted to ADMIN at registration
+    # time; ongoing role changes go through PATCH /admin/users/{id}. ---
+    admin_bootstrap_emails: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
