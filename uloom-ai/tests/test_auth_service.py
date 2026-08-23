@@ -20,6 +20,10 @@ class FakeUserRepository:
 
     async def create(self, user: User) -> User:
         user.id = uuid.uuid4()
+        # Mirrors the DB: User.is_active's default=True is applied by
+        # SQLAlchemy at INSERT/flush time, not by the Python constructor, so
+        # a bare User(...) has is_active=None until something sets it.
+        user.is_active = True
         self.users[user.email] = user
         return user
 
@@ -66,3 +70,27 @@ async def test_login_rejects_wrong_password(auth_service: AuthService):
 async def test_login_rejects_unknown_email(auth_service: AuthService):
     with pytest.raises(InvalidCredentialsError):
         await auth_service.login("nobody@example.com", "whatever123")
+
+
+async def test_login_rejects_disabled_user(auth_service: AuthService):
+    user, _ = await auth_service.register("disabled@example.com", "hunter2hunter2")
+    user.is_active = False
+
+    with pytest.raises(InvalidCredentialsError):
+        await auth_service.login("disabled@example.com", "hunter2hunter2")
+
+
+async def test_register_promotes_bootstrap_email_to_admin():
+    service = AuthService(FakeUserRepository(), admin_bootstrap_emails="admin@example.com, other@x.com")
+
+    user, _ = await service.register("Admin@Example.com", "hunter2hunter2")
+
+    assert user.role == UserRole.ADMIN
+
+
+async def test_register_does_not_promote_non_bootstrap_email():
+    service = AuthService(FakeUserRepository(), admin_bootstrap_emails="admin@example.com")
+
+    user, _ = await service.register("standard@example.com", "hunter2hunter2")
+
+    assert user.role == UserRole.STANDARD

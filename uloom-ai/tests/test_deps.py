@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import deps
+from app.core.config import Settings
 from app.core.security import create_access_token
 from app.models.user import User, UserRole
 
@@ -16,8 +17,13 @@ class FakeUserRepository:
         return self.users.get(user_id)
 
 
-def _make_user(role: UserRole = UserRole.STANDARD) -> User:
-    return User(id=uuid.uuid4(), email="user@example.com", hashed_password="hashed", role=role)
+def _make_user(role: UserRole = UserRole.STANDARD, is_active: bool = True) -> User:
+    # is_active=True passed explicitly: User.is_active's default is applied
+    # by SQLAlchemy at INSERT/flush time, not by the Python constructor, so
+    # a bare User(...) would otherwise have is_active=None (falsy).
+    return User(
+        id=uuid.uuid4(), email="user@example.com", hashed_password="hashed", role=role, is_active=is_active
+    )
 
 
 def test_repository_wrapper_dependencies_construct_repositories():
@@ -32,7 +38,7 @@ def test_repository_wrapper_dependencies_construct_repositories():
 def test_get_auth_service_wraps_repository():
     session = object()
     users = deps.get_user_repository(session)
-    service = deps.get_auth_service(users)
+    service = deps.get_auth_service(users, Settings())
     assert service._users is users
 
 
@@ -69,6 +75,16 @@ async def test_get_current_user_rejects_unknown_user():
     token = create_access_token(subject=str(uuid.uuid4()), role="standard")
     with pytest.raises(HTTPException) as exc_info:
         await deps.get_current_user(token=token, users=FakeUserRepository({}))
+    assert exc_info.value.status_code == 401
+
+
+async def test_get_current_user_rejects_disabled_user():
+    user = _make_user(is_active=False)
+    repo = FakeUserRepository({user.id: user})
+    token = create_access_token(subject=str(user.id), role=user.role.value)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.get_current_user(token=token, users=repo)
     assert exc_info.value.status_code == 401
 
 
