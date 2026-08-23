@@ -30,7 +30,9 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus), default=DocumentStatus.UPLOADED, nullable=False
+        Enum(DocumentStatus, values_callable=lambda cls: [e.value for e in cls]),
+        default=DocumentStatus.UPLOADED,
+        nullable=False,
     )
     created_at: Mapped[datetime] = created_at_col()
 

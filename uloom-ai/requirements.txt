@@ -13,6 +13,10 @@ pgvector>=0.3
 # Auth
 python-jose[cryptography]>=3.3
 passlib[bcrypt]>=1.7
+# passlib 1.7.4 (latest release) probes bcrypt internals that were removed in
+# bcrypt>=4.1, causing every hash_password()/verify_password() call to raise
+# ValueError. Pin below that until passlib ships a compatible release.
+bcrypt<4.1
 
 # Cache / queue state
 redis>=5.0

@@ -25,7 +25,11 @@ class User(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.STANDARD, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, values_callable=lambda cls: [e.value for e in cls]),
+        default=UserRole.STANDARD,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = created_at_col()
 
     documents: Mapped[list["Document"]] = relationship(back_populates="owner")  # noqa: F821
