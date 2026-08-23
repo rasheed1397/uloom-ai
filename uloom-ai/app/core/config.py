@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_ttl_minutes: int = 30
 
+    # --- CORS (frontend is a separate origin - SRS Sec.1.3.2 assumes a
+    # browser client). Vite's default dev port is the local default; set
+    # CORS_ALLOWED_ORIGINS explicitly for staging/prod. ---
+    cors_allowed_origins: tuple[str, ...] = ("http://localhost:5173",)
+
 
 @lru_cache
 def get_settings() -> Settings:
