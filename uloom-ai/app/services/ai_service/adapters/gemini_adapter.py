@@ -6,6 +6,7 @@ Swapping only one side later (e.g., embeddings to Voyage AI) means writing a
 new adapter for that one interface and pointing AI_EMBEDDING_PROVIDER at it
 (Sec.5.6, practice #3) — this class does not need to change.
 """
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -65,9 +66,12 @@ class GeminiAdapter(ChatProvider, EmbeddingProvider):
                     temperature=request.temperature,
                 ),
             )
-        except genai_errors.ClientError as exc:  # 4xx: auth, rate limit, content policy
-            raise _map_client_error(exc) from exc
-        except TimeoutError as exc:
+        except genai_errors.APIError as exc:  # 4xx (auth, rate limit, content policy) or 5xx
+            raise _map_api_error(exc) from exc
+        except (TimeoutError, httpx.TransportError) as exc:
+            # httpx.TransportError covers connection/TLS/DNS failures, not
+            # just timeouts - the SDK doesn't wrap these into APIError since
+            # they never reach the point of getting an HTTP response at all.
             raise ProviderTimeoutError(str(exc)) from exc
 
         usage = response.usage_metadata
@@ -86,9 +90,9 @@ class GeminiAdapter(ChatProvider, EmbeddingProvider):
                 # runtime value for `contents`; mypy flags it due to List invariance against the
                 # SDK's broader Union type, not an actual type mismatch.
             )
-        except genai_errors.ClientError as exc:
-            raise _map_client_error(exc) from exc
-        except TimeoutError as exc:
+        except genai_errors.APIError as exc:
+            raise _map_api_error(exc) from exc
+        except (TimeoutError, httpx.TransportError) as exc:
             raise ProviderTimeoutError(str(exc)) from exc
 
         embeddings = response.embeddings or []
@@ -108,10 +112,11 @@ def _first_finish_reason(response: genai_types.GenerateContentResponse) -> str:
     return "stop"
 
 
-def _map_client_error(exc: genai_errors.ClientError) -> ProviderError:
-    """Normalize Gemini's ClientError into the shared provider-error
-    hierarchy (Sec.5.6, practice #5) so retry/fallback logic (NFR-005,
-    SRS Sec.9) never has to branch on the Gemini SDK specifically."""
+def _map_api_error(exc: genai_errors.APIError) -> ProviderError:
+    """Normalize Gemini's APIError (4xx ClientError or 5xx ServerError) into
+    the shared provider-error hierarchy (Sec.5.6, practice #5) so
+    retry/fallback logic (NFR-005, SRS Sec.9) never has to branch on the
+    Gemini SDK specifically."""
     status = exc.code
     if status in (401, 403):
         return ProviderAuthError(str(exc))
@@ -119,4 +124,9 @@ def _map_client_error(exc: genai_errors.ClientError) -> ProviderError:
         return ProviderRateLimitError(str(exc))
     if status == 400 and "safety" in str(exc).lower():
         return ProviderContentPolicyError(str(exc))
+    if status is not None and status >= 500:
+        # Treated the same as a connection-level timeout: a 5xx from the
+        # provider is "temporarily unavailable, worth a retry", not a
+        # request-shape problem the caller can fix.
+        return ProviderTimeoutError(str(exc))
     return ProviderError(str(exc))
