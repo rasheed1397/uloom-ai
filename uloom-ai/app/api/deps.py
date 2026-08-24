@@ -18,6 +18,7 @@ from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.message_repository import MessageRepository
+from app.repositories.system_settings_repository import SystemSettingsRepository
 from app.repositories.user_repository import UserRepository
 from app.services.admin_service import AdminService
 from app.services.ai_service.factory import get_chat_provider, get_embedding_provider
@@ -52,6 +53,32 @@ def get_message_repository(session: SessionDep) -> MessageRepository:
     return MessageRepository(session)
 
 
+def get_system_settings_repository(session: SessionDep) -> SystemSettingsRepository:
+    return SystemSettingsRepository(session)
+
+
+async def get_effective_settings(
+    settings: Annotated[Settings, Depends(get_settings)],
+    system_settings: Annotated[SystemSettingsRepository, Depends(get_system_settings_repository)],
+) -> Settings:
+    """FR-009: retrieval_top_k/chunk_token_size/similarity_threshold are
+    admin-adjustable at runtime (PATCH /admin/settings) without a
+    deployment, so - unlike the rest of Settings, which is fixed at process
+    startup from the environment - these three are re-read from the DB on
+    every request. Settings.model_copy keeps everything else (secrets,
+    provider config, storage paths) exactly as the static env-loaded
+    values.
+    """
+    db_settings = await system_settings.get()
+    return settings.model_copy(
+        update={
+            "retrieval_top_k": db_settings.retrieval_top_k,
+            "chunk_token_size": db_settings.chunk_token_size,
+            "similarity_threshold": db_settings.similarity_threshold,
+        }
+    )
+
+
 def get_auth_service(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     settings: Annotated[Settings, Depends(get_settings)],
@@ -67,7 +94,7 @@ def get_conversation_service(
     conversations: Annotated[ConversationRepository, Depends(get_conversation_repository)],
     messages: Annotated[MessageRepository, Depends(get_message_repository)],
     vector_service: Annotated[VectorService, Depends(get_vector_service)],
-    settings: Annotated[Settings, Depends(get_settings)],
+    settings: Annotated[Settings, Depends(get_effective_settings)],
 ) -> ConversationService:
     return ConversationService(conversations, messages, vector_service, get_chat_provider(), settings)
 
@@ -75,7 +102,7 @@ def get_conversation_service(
 def get_document_service(
     documents: Annotated[DocumentRepository, Depends(get_document_repository)],
     chunks: Annotated[ChunkRepository, Depends(get_chunk_repository)],
-    settings: Annotated[Settings, Depends(get_settings)],
+    settings: Annotated[Settings, Depends(get_effective_settings)],
 ) -> DocumentService:
     return DocumentService(
         document_repository=documents,
@@ -92,8 +119,9 @@ def get_admin_service(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     documents: Annotated[DocumentRepository, Depends(get_document_repository)],
     document_service: Annotated[DocumentService, Depends(get_document_service)],
+    system_settings: Annotated[SystemSettingsRepository, Depends(get_system_settings_repository)],
 ) -> AdminService:
-    return AdminService(users, documents, document_service)
+    return AdminService(users, documents, document_service, system_settings)
 
 
 async def get_current_user(

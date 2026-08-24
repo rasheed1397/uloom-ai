@@ -12,3 +12,7 @@ export function login(email: string, password: string): Promise<TokenResponse> {
 export function getCurrentUser(): Promise<User> {
   return apiRequest<User>('/users/me')
 }
+
+export function updateProfile(changes: { email?: string; password?: string }): Promise<User> {
+  return apiRequest<User>('/users/me', { method: 'PATCH', body: changes })
+}

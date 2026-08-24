@@ -20,7 +20,9 @@ export function Layout({ children }: { children: ReactNode }) {
             <NavLink to="/documents">Documents</NavLink>
             <NavLink to="/conversations">Conversations</NavLink>
             {user.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
-            <span className="app-user">{user.email}</span>
+            <NavLink to="/profile" className="app-user">
+              {user.email}
+            </NavLink>
             <button type="button" onClick={handleLogout}>
               Log out
             </button>

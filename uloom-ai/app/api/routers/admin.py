@@ -5,8 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import AdminUser, get_admin_service
-from app.core.config import Settings, get_settings
-from app.schemas.admin import AdminUserOut, SettingsOut, UpdateUserRequest
+from app.schemas.admin import AdminUserOut, SettingsOut, UpdateSettingsRequest, UpdateUserRequest
 from app.schemas.documents import DocumentOut
 from app.services.admin_service import AdminService, DocumentNotFoundError, UserNotFoundError
 
@@ -57,21 +56,21 @@ async def delete_any_document(
 
 @router.get("/settings", response_model=SettingsOut)
 async def get_settings_view(
-    _admin: AdminUser, settings: Annotated[Settings, Depends(get_settings)]
+    _admin: AdminUser, admin_service: Annotated[AdminService, Depends(get_admin_service)]
 ) -> SettingsOut:
-    return SettingsOut(
-        retrieval_top_k=settings.retrieval_top_k,
-        chunk_token_size=settings.chunk_token_size,
-        similarity_threshold=settings.similarity_threshold,
+    settings = await admin_service.get_settings()
+    return SettingsOut.model_validate(settings)
+
+
+@router.patch("/settings", response_model=SettingsOut)
+async def update_settings_view(
+    body: UpdateSettingsRequest,
+    _admin: AdminUser,
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+) -> SettingsOut:
+    settings = await admin_service.update_settings(
+        retrieval_top_k=body.retrieval_top_k,
+        chunk_token_size=body.chunk_token_size,
+        similarity_threshold=body.similarity_threshold,
     )
-
-
-@router.patch("/settings")
-async def update_settings_view(_admin: AdminUser) -> None:
-    # Deliberately still not implemented: FR-009 wants these adjustable
-    # "without a deployment", which means runtime-mutable persisted config,
-    # not the startup-time Settings object used everywhere else in the app.
-    # Doing that properly is a schema + read-path change across VectorService/
-    # ConversationService, not a one-route fix - left as a follow-up rather
-    # than half-implemented here.
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not yet implemented")
+    return SettingsOut.model_validate(settings)

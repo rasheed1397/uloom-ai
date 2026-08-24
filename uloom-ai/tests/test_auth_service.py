@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, verify_password
 from app.models.user import User, UserRole
 from app.services.auth_service import (
     AuthService,
@@ -94,3 +94,48 @@ async def test_register_does_not_promote_non_bootstrap_email():
     user, _ = await service.register("standard@example.com", "hunter2hunter2")
 
     assert user.role == UserRole.STANDARD
+
+
+async def test_update_profile_changes_email(auth_service: AuthService):
+    user, _ = await auth_service.register("old@example.com", "hunter2hunter2")
+
+    updated = await auth_service.update_profile(user, email="new@example.com", password=None)
+
+    assert updated is user
+    assert updated.email == "new@example.com"
+
+
+async def test_update_profile_allows_keeping_the_same_email(auth_service: AuthService):
+    user, _ = await auth_service.register("same@example.com", "hunter2hunter2")
+
+    updated = await auth_service.update_profile(user, email="same@example.com", password=None)
+
+    assert updated.email == "same@example.com"
+
+
+async def test_update_profile_rejects_email_already_used_by_another_user(auth_service: AuthService):
+    await auth_service.register("taken@example.com", "hunter2hunter2")
+    user, _ = await auth_service.register("mine@example.com", "hunter2hunter2")
+
+    with pytest.raises(EmailAlreadyRegisteredError):
+        await auth_service.update_profile(user, email="taken@example.com", password=None)
+    assert user.email == "mine@example.com"
+
+
+async def test_update_profile_changes_password(auth_service: AuthService):
+    user, _ = await auth_service.register("pw@example.com", "hunter2hunter2")
+
+    updated = await auth_service.update_profile(user, email=None, password="newpassword123")
+
+    assert verify_password("newpassword123", updated.hashed_password)
+    assert not verify_password("hunter2hunter2", updated.hashed_password)
+
+
+async def test_update_profile_with_no_changes_is_a_noop(auth_service: AuthService):
+    user, _ = await auth_service.register("noop@example.com", "hunter2hunter2")
+    original_hash = user.hashed_password
+
+    updated = await auth_service.update_profile(user, email=None, password=None)
+
+    assert updated.email == "noop@example.com"
+    assert updated.hashed_password == original_hash

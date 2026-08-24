@@ -43,3 +43,15 @@ class AuthService:
             raise InvalidCredentialsError
         token = create_access_token(subject=str(user.id), role=user.role.value)
         return user, token
+
+    async def update_profile(self, user: User, email: str | None, password: str | None) -> User:
+        """Self-service profile update (FR-002). Role is deliberately not
+        settable here - see UpdateProfileRequest."""
+        if email is not None and email != user.email:
+            existing = await self._users.get_by_email(email)
+            if existing is not None and existing.id != user.id:
+                raise EmailAlreadyRegisteredError(email)
+            user.email = email
+        if password is not None:
+            user.hashed_password = hash_password(password)
+        return user

@@ -102,16 +102,20 @@ Fully working:
   broadened `ClientError` to `APIError` there so 5xx responses aren't
   silently unmapped either.
 - `/admin/*` — reachable now via a bootstrap mechanism (see below).
-  `GET /admin/users`, `PATCH /admin/users/{id}` (role, `is_active`),
-  `GET /admin/documents`, `DELETE /admin/documents/{id}`, and
-  `GET /admin/settings` are implemented via `AdminService`.
-  **Deliberately still 501**: `PATCH /admin/settings` (FR-009 wants
-  retrieval-top-k/chunk-size adjustable "without a deployment", which needs
-  runtime-persisted config read by VectorService/ConversationService, not
-  the startup-time `Settings` object — a real schema + read-path change,
-  not a one-route fix) and AI provider credential rotation (would need a
-  managed secret store per NFR-004; storing keys in Postgres would
-  undermine that requirement rather than satisfy it).
+  `GET/PATCH /admin/users/{id}` (role, `is_active`), `GET /admin/documents`,
+  `DELETE /admin/documents/{id}`, and `GET`/`PATCH /admin/settings` are all
+  implemented via `AdminService`. AI provider credential rotation remains
+  deliberately unimplemented — would need a managed secret store per
+  NFR-004; storing keys in Postgres would undermine that requirement rather
+  than satisfy it, so it stays out rather than being half-done.
+- `/users/me` now supports `PATCH` too (FR-002 self-service profile
+  update: email and/or password). `role` is deliberately not a field on
+  `UpdateProfileRequest` — role changes stay Administrator-only via
+  `PATCH /admin/users/{id}`, so there's no self-promotion path. Note: the
+  SRS's actual FR-002 acceptance criteria (profile+role readable, role
+  changes take effect on next request) was already fully satisfied before
+  this — this `PATCH` fulfills the Design doc's API resource map wording
+  ("Read/update profile"), which is a stronger ask than the SRS itself.
 
 **Admin bootstrap (FR-009 open item, now resolved):** the first admin(s)
 are created via `ADMIN_BOOTSTRAP_EMAILS` (comma-separated, checked at
@@ -120,20 +124,22 @@ promotion path, since promotion needs an existing admin and this avoids
 that chicken-and-egg problem and any privilege-escalation surface. Ongoing
 role/active changes go through `PATCH /admin/users/{id}`.
 
-Retrieval in `ConversationService.ask()` still returns whatever
-`VectorService` finds without filtering by `SIMILARITY_THRESHOLD` — see the
-`TODO` there. The threshold value itself is still an open item (needs eval
-against real query data) - unchanged by this pass.
+**FR-009 settings tuning, and FR-006's SIMILARITY_THRESHOLD, are both
+resolved now** (previously: settings PATCH was 501, and the threshold was
+computed but never applied — see the `2026-08-23` "FR-002/006/009
+completion" note below for how).
 
-**Not yet covered by automated tests.** Test coverage (PR #2, currently
-open/paused) predates this work and doesn't exercise any of it. Everything
-above was verified manually against a live Postgres+pgvector instance
+**Covered by automated tests as of the PR #2 merge** (this paragraph is
+stale history, kept for context: at the time this section was first
+written, PR #2's test suite predated this implementation and didn't
+exercise any of it — that's since been fixed; PR #2's tests were rewritten
+against this actual implementation before merging, see its PR description).
+Also verified manually against a live Postgres+pgvector instance
 (register/login/disable, upload/list/get/delete across text/PDF/DOCX,
 conversation create/list/ask including the degraded-mode path, admin
-bootstrap/list/patch/delete) — see the PR description for the full manual
-test log. `pypdf`, `python-docx`, `python-multipart`, and `httpx` (now a
-direct dependency, not just transitive via `google-genai`) were added to
-`requirements.txt`.
+bootstrap/list/patch/delete). `pypdf`, `python-docx`, `python-multipart`,
+and `httpx` (now a direct dependency, not just transitive via
+`google-genai`) were added to `requirements.txt`.
 
 **`GEMINI_CHAT_MODEL` was bumped from `gemini-2.5-flash` to
 `gemini-3.6-flash`** after the manual verification above initially caught
@@ -143,24 +149,83 @@ from the Gemini API - `gemini-2.5-flash` is no longer available to new
 users. After the fix, ran the full RAG flow live end-to-end: a grounded
 question returned a correct answer with an accurate citation
 (chunk/document/source_location all matched), and an off-topic question
-correctly avoided hallucinating (though it still cited an irrelevant chunk
-- that's the pre-existing `SIMILARITY_THRESHOLD` gap noted above, not
-something this pass introduced).
+correctly avoided hallucinating (though at the time it still cited an
+irrelevant chunk - that specific symptom is what the FR-006 fix below
+addresses; SIMILARITY_THRESHOLD is applied now, so a genuinely irrelevant
+chunk should no longer be retrieved at all, let alone cited).
 
-## Verified, not yet run live
+## Run live, repeatedly (this section is stale history)
 
-- `ruff check .` and `mypy app` both pass clean.
-- `pytest` passes (one health-check test).
-- `alembic upgrade head --sql` was used to confirm the baseline migration
-  compiles to valid PostgreSQL DDL (including the pgvector `VECTOR(3072)`
-  column), but it has **never been run against a live database** — no
-  Postgres/pgvector instance was available in the scaffolding sandbox.
-- `docker-compose.yml` was validated as syntactically correct YAML only —
-  `docker-compose up` has never actually been executed against it.
+This section originally said none of this had ever been run against a live
+database, based on the scaffolding sandbox not having Postgres available.
+That's long since stopped being true: `alembic upgrade head` (not just
+`--sql`), `docker-compose`'s `db`/`redis` containers, and the full
+API surface (including live Gemini embedding + chat calls) have all been
+exercised repeatedly against a real Postgres+pgvector instance across
+several sessions, plus the full frontend click-through. `ruff check .` and
+`mypy app` both still pass clean. Kept as a note for future sessions: don't
+trust a "never verified live" claim in this file at face value if the
+`## Implementation status` sections above it describe live verification -
+update this section instead of leaving contradictory claims in the file.
 
-Treat "first real run" (whichever setup path — Docker or native
-Postgres/pgvector/Redis via WSL2) as the next real test of this scaffold,
-not something already confirmed working end to end.
+## FR-002/FR-006/FR-009 completion (2026-08-23)
+
+An SRS gap-analysis pass (comparing the actual code against the SRS's FRs
+and NFRs, not just the Design doc) found several outstanding items;
+completed the three that were safely completable without new
+infrastructure (a managed secret store, structured logging, retry/fallback
+providers, and similar remain open - see that gap-analysis conversation for
+the full list, not reproduced here).
+
+- **FR-002**: `PATCH /users/me` added (`UpdateProfileRequest`: `email`
+  and/or `password`, deliberately no `role` field). Covered above in
+  Implementation status.
+- **FR-006**: `SIMILARITY_THRESHOLD` is now actually applied, not just
+  computed. `ChunkRepository.similarity_search` gained a `max_distance`
+  parameter and filters in the SQL query itself (`WHERE cosine_distance <=
+  max_distance`), not as a Python post-filter - same rationale as the
+  existing owner-scoping filter (Sec.5.3): keeps "nothing similar enough"
+  indistinguishable at the query level from "no chunks exist", so nothing
+  downstream can accidentally see unfiltered results. `VectorService.search`
+  converts the similarity threshold (0-1, higher = more similar) to a
+  cosine-distance ceiling (`1 - threshold`) before passing it down -
+  distance and similarity are inverses. `ConversationService.ask()` now
+  passes `settings.similarity_threshold` through.
+- **FR-009 settings tuning**: new `system_settings` table (migration
+  `0003`), a deliberate singleton - exactly one row, `id` fixed at 1, seeded
+  by the migration with `app.core.config.Settings`' current defaults
+  (5/512/0.7). `SystemSettingsRepository` reads/writes it;
+  `AdminService.get_settings`/`update_settings` wrap that for the router.
+  `PATCH /admin/settings` now actually updates `retrieval_top_k`,
+  `chunk_token_size`, and `similarity_threshold` at runtime,
+  no redeploy needed - the literal FR-009 acceptance criteria. The
+  mechanism: `deps.get_effective_settings` reads the DB row on **every
+  request** and returns `Settings.model_copy(update={...})` - a copy of the
+  static, env-loaded `Settings` with only those three fields overridden.
+  `get_conversation_service` and `get_document_service` depend on
+  `get_effective_settings` now, not the raw `Depends(get_settings)` static
+  singleton. Everything else in `Settings` (secrets, provider selection,
+  storage paths) is untouched and still comes from the environment only -
+  this table is deliberately scoped to just the three tunables FR-009 names
+  ("e.g., retrieval top-k, chunk size"), not a general settings-override
+  system.
+- **Test infra note**: `tests/conftest.py`'s `_clean_db` autouse fixture
+  truncates every table before each test. `system_settings` had to be
+  special-cased - it's a singleton config row seeded once by a migration,
+  not per-test data, so truncating it would break
+  `SystemSettingsRepository.get()` (which expects exactly one row to exist)
+  for every test after the first. It's now reset to known default values
+  instead of deleted, so tests get a consistent starting point without
+  losing the row.
+- **Still not done, and not a one-line fix if picked up later**: AI
+  provider credential rotation (FR-009's other half) - real reason
+  unchanged, needs a managed secret store (NFR-004) this codebase doesn't
+  have. Also still open: NFR-005/Sec.9's actual retry-with-backoff and
+  fallback-provider behavior (only graceful degradation exists, not retry
+  or fallback), NFR-008 correlation-ID logging, Sec.10 encryption at rest,
+  retention-period configuration, and pgvector index tuning (no
+  `IVFFlat`/`HNSW` index exists on `chunks.embedding_vector` - fine at
+  current scale, won't be at volume).
 
 ## Environment setup
 
@@ -210,6 +275,8 @@ around with a portable Node 22 zip extracted to
 proper nvm/system Node upgrade happens later, this section can go.
 
 **Known gaps** (also listed in `frontend/README.md`): no tests, no document
-content/chunk viewer (status only), admin settings are read-only in the UI
-since `PATCH /admin/settings` isn't implemented on the backend (see PR #3's
-notes above on why).
+content/chunk viewer (status only). Admin settings became editable in the
+UI (`ProfilePage`/`AdminPage` added) once the backend's FR-002/FR-009 gaps
+closed — see that section above; this note is here so a future pass
+doesn't assume the UI is still ahead of or behind the backend on these
+without checking.

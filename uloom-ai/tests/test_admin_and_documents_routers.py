@@ -164,12 +164,35 @@ async def test_admin_delete_document_404s_for_unknown_document(
 async def test_admin_settings_view_reflects_config(client: AsyncClient, admin_headers: dict[str, str]):
     response = await client.get("/admin/settings", headers=admin_headers)
     assert response.status_code == 200
-    body = response.json()
-    assert set(body) == {"retrieval_top_k", "chunk_token_size", "similarity_threshold"}
+    assert response.json() == {
+        "retrieval_top_k": 5,
+        "chunk_token_size": 512,
+        "similarity_threshold": 0.7,
+    }
 
 
-async def test_admin_settings_update_is_not_yet_implemented(
+async def test_admin_can_update_settings_and_it_takes_effect_without_a_deployment(
     client: AsyncClient, admin_headers: dict[str, str]
 ):
-    response = await client.patch("/admin/settings", headers=admin_headers)
-    assert response.status_code == 501
+    updated = await client.patch(
+        "/admin/settings", headers=admin_headers, json={"retrieval_top_k": 3, "similarity_threshold": 0.5}
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {
+        "retrieval_top_k": 3,
+        "chunk_token_size": 512,  # untouched field keeps its previous value
+        "similarity_threshold": 0.5,
+    }
+
+    # FR-009: reflected immediately on the next request, no redeploy/restart.
+    fetched = await client.get("/admin/settings", headers=admin_headers)
+    assert fetched.json() == updated.json()
+
+
+async def test_admin_update_settings_rejects_invalid_values(
+    client: AsyncClient, admin_headers: dict[str, str]
+):
+    response = await client.patch(
+        "/admin/settings", headers=admin_headers, json={"similarity_threshold": 1.5}
+    )
+    assert response.status_code == 422

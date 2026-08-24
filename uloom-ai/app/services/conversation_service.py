@@ -1,8 +1,11 @@
 """Conversation Service (Detailed Design Sec.5.4). SRS FR-006, FR-007, FR-008.
 
 Owns the "no relevant context above threshold" decision (FR-006) and the
-unsupported-answer flag (FR-007) before persisting a message. Threshold value
-is an open item (Detailed Design Sec.6) pending eval against real data.
+unsupported-answer flag (FR-007) before persisting a message. The threshold
+itself (SIMILARITY_THRESHOLD) is applied in ChunkRepository.similarity_search
+via VectorService.search; its actual value is still an open item (Detailed
+Design Sec.6) pending eval against real data - 0.7 is a starting default, not
+a validated one.
 """
 import uuid
 
@@ -62,14 +65,19 @@ class ConversationService:
         # a graceful assistant message, never an unhandled 500 or a hang.
         try:
             chunks = await self._vectors.search(
-                question, owner_document_ids, top_k=self._settings.retrieval_top_k
+                question,
+                owner_document_ids,
+                top_k=self._settings.retrieval_top_k,
+                similarity_threshold=self._settings.similarity_threshold,
             )
         except ProviderError:
             return await self._degraded_answer(conversation_id, "Search is temporarily unavailable.")
 
-        # TODO: chunks currently returned regardless of distance; filter by
-        # self._settings.similarity_threshold once that value is validated
-        # against real query data (Detailed Design Sec.6 open item).
+        # FR-006: chunks below SIMILARITY_THRESHOLD are excluded by the
+        # repository query itself (ChunkRepository.similarity_search), so an
+        # empty list here already means "nothing similar enough" - this is
+        # the "no relevant context above threshold" case, not just "no
+        # documents at all".
         if not chunks:
             answer = Message(
                 conversation_id=conversation_id,

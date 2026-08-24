@@ -13,8 +13,17 @@ class VectorService:
         self._embeddings = embedding_provider
 
     async def search(
-        self, query: str, owner_document_ids: list[uuid.UUID], top_k: int
+        self,
+        query: str,
+        owner_document_ids: list[uuid.UUID],
+        top_k: int,
+        similarity_threshold: float | None = None,
     ) -> list[Chunk]:
         embed_response = await self._embeddings.embed(EmbedRequest(texts=[query]))
         query_vector = embed_response.vectors[0]
-        return await self._chunks.similarity_search(query_vector, owner_document_ids, top_k)
+        # Cosine distance (what pgvector orders/filters by) is the inverse of
+        # cosine similarity (what SIMILARITY_THRESHOLD is expressed in):
+        # distance 0 = identical, so a *higher* similarity floor means a
+        # *lower* distance ceiling.
+        max_distance = 1 - similarity_threshold if similarity_threshold is not None else None
+        return await self._chunks.similarity_search(query_vector, owner_document_ids, top_k, max_distance)

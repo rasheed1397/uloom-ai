@@ -29,16 +29,21 @@ needs `CORS_ALLOWED_ORIGINS` to include this dev server's origin
   inline response models in `app/api/routers/*.py` — not generated, so if a
   backend response shape changes, update both sides manually for now).
 - `src/context/AuthContext.tsx` — holds the current user + JWT (in
-  `localStorage`), exposes `login`/`register`/`logout`.
-- `src/components/` — `Layout` (header/nav) and `ProtectedRoute` (redirects
-  to `/login` if signed out, or `/documents` if `adminOnly` and the user
-  isn't an admin).
-- `src/pages/` — one file per route: login/register, documents
-  (upload/list/delete, polls while a document is `uploaded`/`processing`),
-  conversations (list/create), a conversation's chat view (loads history via
-  `GET /conversations/{id}/messages`, asks via `POST`), and admin
-  (users/documents/settings — settings are read-only, `PATCH
-  /admin/settings` isn't implemented on the backend yet).
+  `localStorage`), exposes `login`/`register`/`logout`/`refreshUser` (the
+  last one re-fetches `/users/me`, used after a profile edit so the header
+  picks up a changed email without a full reload).
+- `src/components/` — `Layout` (header/nav — the email in the header is a
+  link to `/profile`) and `ProtectedRoute` (redirects to `/login` if signed
+  out, or `/documents` if `adminOnly` and the user isn't an admin).
+- `src/pages/` — one file per route: login/register, `/profile`
+  (self-service email/password update, FR-002 — `role` is deliberately not
+  editable here, that's admin-only), documents (upload/list/delete, polls
+  while a document is `uploaded`/`processing`), conversations (list/create),
+  a conversation's chat view (loads history via `GET
+  /conversations/{id}/messages`, asks via `POST`), and admin
+  (users/documents, and settings — `retrieval_top_k`/`chunk_token_size`/
+  `similarity_threshold` are editable now, `PATCH /admin/settings` is
+  implemented backend-side).
 
 ## What's not here yet
 
@@ -46,4 +51,3 @@ needs `CORS_ALLOWED_ORIGINS` to include this dev server's origin
   separate, paused effort; see the backend `CLAUDE.md`).
 - No document content viewer — the Documents page shows status only, not
   the extracted text or chunks.
-- Admin settings are view-only (backend limitation, not a frontend gap).

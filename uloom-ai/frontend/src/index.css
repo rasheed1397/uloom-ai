@@ -311,18 +311,23 @@ a {
 
 /* --- Admin --- */
 
-.settings-list {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
+.settings-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
 }
 
-.settings-list dt {
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
   color: var(--text-muted);
 }
 
-.settings-list dd {
-  margin: 0;
+.settings-form input {
+  width: 8rem;
 }
 
 section + section {
