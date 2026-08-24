@@ -280,3 +280,105 @@ UI (`ProfilePage`/`AdminPage` added) once the backend's FR-002/FR-009 gaps
 closed — see that section above; this note is here so a future pass
 doesn't assume the UI is still ahead of or behind the backend on these
 without checking.
+
+## Docker, document-list refresh, and default admin (2026-08-24)
+
+Three user-reported items, in the order given.
+
+**1. Docker completion.** The `api` image had never actually been rebuilt
+against a current `requirements.txt` - the one `docker ps -a` showed was 3
+days stale and crashed on `ModuleNotFoundError: No module named 'docx'`
+(added since). Also found and fixed while completing this, none of it
+previously done:
+- No `.dockerignore` existed at all - every build sent the entire
+  `uloom-ai/` directory as build context, including `.venv` (thousands of
+  files) and `.git`. Added one (and a separate one for `frontend/`).
+- No migration step ran on container start - a fresh deployment would have
+  booted the API against an empty schema. Added `docker-entrypoint.sh`
+  (`alembic upgrade head` then `exec "$@"`), wired as the Dockerfile's
+  `ENTRYPOINT` with the existing `uvicorn` `CMD` preserved as the
+  overridable command. Added `.gitattributes` (`*.sh text eol=lf`) so this
+  script can't get checked out with CRLF line endings on Windows and break
+  its shebang inside the Linux container.
+- Added a `HEALTHCHECK` to the `api` image (plain Python `urllib.request`
+  hitting `/health` - no `curl` in the `python:3.11-slim` base image).
+- **The frontend had no Docker image at all.** Added
+  `frontend/Dockerfile` (multi-stage: `node:22-alpine` build →
+  `nginx:alpine` serve) and `frontend/nginx.conf` with an SPA fallback
+  (`try_files $uri $uri/ /index.html`) - without it, refreshing on any
+  route but `/` (e.g. `/documents`) 404s, since nginx has no matching file
+  and React Router's client-side routing never gets a chance to run.
+  `VITE_API_BASE_URL` is deliberately *not* set at build time: the bundle
+  runs in the browser, not in the container's network, so it needs
+  `src/api/client.ts`'s existing `http://localhost:8000` fallback (matches
+  `api`'s published port), not an internal Docker DNS name the browser
+  could never resolve. New `frontend` service in `docker-compose.yml`,
+  published on `5173:80`.
+- Verified: `docker compose build`, then `docker compose up` for the full
+  stack (`api`, `frontend`, `db`, `redis`) - see the PR for the exact
+  verification steps taken.
+
+**2. Document list not updating after upload without a manual refresh.**
+A real backend bug, not a frontend oversight - the frontend already called
+`refresh()` right after upload. Root cause: `upload_document`'s background
+task (`DocumentService.process`) reuses the request's own DB session (see
+the "same request-scoped session" note in `document_service.py`, added
+when documents were first implemented) - and FastAPI runs background tasks
+*before* a yield-dependency's post-yield code, which is where
+`app.core.db.get_session`'s commit happens. That meant the newly-created
+`Document` row stayed invisible to *any other DB connection* - including
+the frontend's own immediate `GET /documents` - until the entire
+parse/chunk/embed pipeline finished, which can take real time (a live
+embedding call). Every earlier test of this flow (including the "verified
+live" claims in this file) used empty file content specifically, which
+skips the embedding call and finishes near-instantly - masking exactly
+this bug. It only became visible with real content and real latency,
+which is what a human clicking through the UI naturally does and automated
+testing here hadn't.
+
+Fixed with an explicit `await self._documents.commit()` at the end of
+`DocumentService.create_upload()`, before it returns - decouples the
+initial row's visibility from the background task's later, separate
+commit (which still happens atomically as before, when the request's
+session tears down after the background task finishes). Also added
+`cache: 'no-store'` to every request in `frontend/src/api/client.ts` as
+cheap, unrelated insurance - none of this app's `GET` responses should
+ever be served from the browser's HTTP cache regardless of this specific
+bug's actual cause.
+
+Live-verifying this (real file content, uploaded through the running
+Docker stack, immediate `GET /documents` right after) surfaced a second,
+worse bug the same fix introduced: `app.core.db.get_session` wrapped the
+whole request in `async with session.begin():`, and that context manager
+owns the transaction's entire lifecycle - a service calling
+`session.commit()` mid-request leaves it unable to exit cleanly. The
+background task's later `get_by_id` call (same session, same in-flight
+`session.begin()` block) then crashed with `sqlalchemy.exc.
+InvalidRequestError: Can't operate on closed transaction inside context
+manager`, silently failing the embed pipeline and leaving the document
+stuck at `status: "uploaded"` forever - worse than the original bug, since
+now nothing recovers even on a later manual refresh. Empty-content test
+uploads didn't reach `process()`'s DB call fast enough relative to the
+response cycle to expose this either. Fixed by changing `get_session()` to
+explicit `try: yield session; await session.commit(); except: await
+session.rollback(); raise` instead of the `session.begin()` context
+manager - functionally identical for every other endpoint (still commits
+on success, rolls back on exception), but lets a service commit mid-request
+and keep using the session afterwards, since SQLAlchemy opens a fresh
+transaction automatically on the next statement after a commit. Re-verified
+end-to-end after this fix: immediate visibility on `GET /documents` *and*
+the background pipeline completing to `status: "indexed"` with no errors in
+the container logs.
+
+**3. No default admin before the first registration.** `ADMIN_BOOTSTRAP_EMAILS`
+(existing) only promotes an email *when that person registers* - a fresh
+deployment where nobody has registered yet had no path to `/admin/*` at
+all. Added `DEFAULT_ADMIN_EMAIL`/`DEFAULT_ADMIN_PASSWORD` (both empty by
+default, no hardcoded fallback password) and `app/core/bootstrap.py`'s
+`ensure_default_admin()`, run from `main.py`'s `lifespan` handler on every
+app startup - idempotent (checks for the email first), so it's safe to run
+on every restart, not just the first one. Deliberately takes a
+`UserRepository` parameter rather than opening its own DB session
+internally, so it's unit-testable with a fake the same way every other
+service in this codebase is, rather than needing a real database the way
+`main.py`'s lifespan wiring itself does.

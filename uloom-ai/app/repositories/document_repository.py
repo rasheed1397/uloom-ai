@@ -26,3 +26,12 @@ class DocumentRepository(BaseRepository):
     async def delete(self, document: Document) -> None:
         await self._session.delete(document)
         await self._session.flush()
+
+    async def commit(self) -> None:
+        # Only DocumentRepository exposes this: DocumentService.create_upload
+        # needs the row durably visible to *other* DB connections (a
+        # concurrent GET /documents from the same browser session, not just
+        # this one) before it returns, since the background task that runs
+        # next can take real time (a live embedding call) - see
+        # DocumentService.create_upload for the full explanation.
+        await self._session.commit()

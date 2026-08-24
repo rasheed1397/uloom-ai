@@ -52,6 +52,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     method: options.method ?? 'GET',
     headers,
     body,
+    // Every response here reflects live, frequently-changing server state
+    // (document status, conversation history, admin settings); none of it
+    // should ever be served from the browser's HTTP cache.
+    cache: 'no-store',
   })
 
   if (response.status === 204) {

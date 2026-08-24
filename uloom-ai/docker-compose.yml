@@ -17,6 +17,13 @@ services:
       - ./app:/srv/app/app
       - documents_data:/srv/app/data/documents
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
   db:
     image: pgvector/pgvector:pg16
     environment:
