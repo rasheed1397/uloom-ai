@@ -67,5 +67,8 @@ class AdminService:
         retrieval_top_k: int | None = None,
         chunk_token_size: int | None = None,
         similarity_threshold: float | None = None,
+        retention_days: int | None = None,
     ) -> SystemSettings:
-        return await self._system_settings.update(retrieval_top_k, chunk_token_size, similarity_threshold)
+        return await self._system_settings.update(
+            retrieval_top_k, chunk_token_size, similarity_threshold, retention_days
+        )

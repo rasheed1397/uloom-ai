@@ -25,6 +25,7 @@ class SettingsOut(BaseModel):
     retrieval_top_k: int
     chunk_token_size: int
     similarity_threshold: float
+    retention_days: int
 
     model_config = {"from_attributes": True}
 
@@ -33,3 +34,4 @@ class UpdateSettingsRequest(BaseModel):
     retrieval_top_k: int | None = Field(default=None, ge=1)
     chunk_token_size: int | None = Field(default=None, ge=1)
     similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    retention_days: int | None = Field(default=None, ge=1)

@@ -1,4 +1,8 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+// NFR-004: https by default - the api container serves TLS on 8000 (see
+// its docker-entrypoint.sh). The browser will show a one-time trust prompt
+// for the self-signed cert; visit https://localhost:8000/health directly
+// and accept it once before using the app.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://localhost:8000'
 
 const TOKEN_STORAGE_KEY = 'uloom_access_token'
 

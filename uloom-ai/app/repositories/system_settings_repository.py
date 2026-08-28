@@ -19,6 +19,7 @@ class SystemSettingsRepository(BaseRepository):
         retrieval_top_k: int | None = None,
         chunk_token_size: int | None = None,
         similarity_threshold: float | None = None,
+        retention_days: int | None = None,
     ) -> SystemSettings:
         settings = await self.get()
         if retrieval_top_k is not None:
@@ -27,5 +28,7 @@ class SystemSettingsRepository(BaseRepository):
             settings.chunk_token_size = chunk_token_size
         if similarity_threshold is not None:
             settings.similarity_threshold = similarity_threshold
+        if retention_days is not None:
+            settings.retention_days = retention_days
         await self._session.flush()
         return settings

@@ -168,6 +168,7 @@ async def test_admin_settings_view_reflects_config(client: AsyncClient, admin_he
         "retrieval_top_k": 5,
         "chunk_token_size": 512,
         "similarity_threshold": 0.7,
+        "retention_days": 90,
     }
 
 
@@ -182,6 +183,7 @@ async def test_admin_can_update_settings_and_it_takes_effect_without_a_deploymen
         "retrieval_top_k": 3,
         "chunk_token_size": 512,  # untouched field keeps its previous value
         "similarity_threshold": 0.5,
+        "retention_days": 90,  # untouched field keeps its previous value
     }
 
     # FR-009: reflected immediately on the next request, no redeploy/restart.

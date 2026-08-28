@@ -11,6 +11,7 @@ export function AdminPage() {
     retrieval_top_k: '',
     chunk_token_size: '',
     similarity_threshold: '',
+    retention_days: '',
   })
   const [savingSettings, setSavingSettings] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -29,6 +30,7 @@ export function AdminPage() {
       retrieval_top_k: String(s.retrieval_top_k),
       chunk_token_size: String(s.chunk_token_size),
       similarity_threshold: String(s.similarity_threshold),
+      retention_days: String(s.retention_days),
     })
   }
 
@@ -67,6 +69,7 @@ export function AdminPage() {
         retrieval_top_k: Number(settingsForm.retrieval_top_k),
         chunk_token_size: Number(settingsForm.chunk_token_size),
         similarity_threshold: Number(settingsForm.similarity_threshold),
+        retention_days: Number(settingsForm.retention_days),
       })
       await refresh()
     } catch (err) {
@@ -181,6 +184,19 @@ export function AdminPage() {
                 value={settingsForm.similarity_threshold}
                 onChange={(e) =>
                   setSettingsForm((f) => ({ ...f, similarity_threshold: e.target.value }))
+                }
+                required
+              />
+            </label>
+            <label>
+              Retention period (days)
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settingsForm.retention_days}
+                onChange={(e) =>
+                  setSettingsForm((f) => ({ ...f, retention_days: e.target.value }))
                 }
                 required
               />

@@ -13,6 +13,7 @@ from app.models.system_settings import SystemSettings
 _DEFAULT_RETRIEVAL_TOP_K = 5
 _DEFAULT_CHUNK_TOKEN_SIZE = 512
 _DEFAULT_SIMILARITY_THRESHOLD = 0.7
+_DEFAULT_RETENTION_DAYS = 90
 
 
 @pytest.fixture
@@ -38,3 +39,4 @@ async def _clean_db():
         settings.retrieval_top_k = _DEFAULT_RETRIEVAL_TOP_K
         settings.chunk_token_size = _DEFAULT_CHUNK_TOKEN_SIZE
         settings.similarity_threshold = _DEFAULT_SIMILARITY_THRESHOLD
+        settings.retention_days = _DEFAULT_RETENTION_DAYS

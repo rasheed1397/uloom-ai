@@ -56,7 +56,7 @@ class DocumentService:
         document = await self._documents.create(
             Document(owner_id=owner_id, filename=filename, mime_type=mime_type)
         )
-        await self._storage.save(_storage_key(document.id), content)
+        await self._storage.save(document_storage_key(document.id), content)
         # Committed here, explicitly, rather than waiting for the ambient
         # per-request commit (app.core.db.get_session): FastAPI runs
         # background tasks *before* a yield-dependency's post-yield code, so
@@ -96,7 +96,7 @@ class DocumentService:
         document.status = DocumentStatus.PROCESSING
 
         try:
-            raw = await self._storage.read(_storage_key(document.id))
+            raw = await self._storage.read(document_storage_key(document.id))
             segments = extract_text(document.mime_type, raw)
             text_chunks = chunk_segments(segments, self._chunk_token_size)
             if text_chunks:
@@ -124,9 +124,9 @@ class DocumentService:
             document.status_detail = str(exc)
 
     async def delete(self, document: Document) -> None:
-        await self._storage.delete(_storage_key(document.id))
+        await self._storage.delete(document_storage_key(document.id))
         await self._documents.delete(document)
 
 
-def _storage_key(document_id: uuid.UUID) -> str:
+def document_storage_key(document_id: uuid.UUID) -> str:
     return f"{document_id}"

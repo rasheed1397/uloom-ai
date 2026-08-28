@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # --- AI provider selection (Detailed Design Sec.5.6) ---
     ai_chat_provider: str = "gemini"
     ai_embedding_provider: str = "gemini"
+    # NFR-005/SRS Sec.9: "routed to a configured fallback provider if
+    # available" - empty (the default) means no fallback, matching today's
+    # single-vendor-for-v1 decision (Sec.5.5); set once a second adapter is
+    # implemented. Left blank or equal to the primary is treated as "no
+    # fallback" by app.services.ai_service.factory, not a redundant self-call.
+    ai_chat_provider_fallback: str = ""
+    ai_embedding_provider_fallback: str = ""
 
     # TODO:: Rename api key(s) and model(s) to be more generic, not provider specific. Unless the current approach is more aligned with best practices. Need to research and confirm.
     gemini_api_key: str = ""
@@ -39,6 +46,11 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     chunk_token_size: int = 512
     similarity_threshold: float = 0.7
+    # Sec.10 data retention default; mirrors the system_settings singleton's
+    # seed value (0005 migration) the same way the three fields above mirror
+    # theirs - the retention sweep (app.core.retention) always reads the
+    # live DB value, never this one, but it documents the starting point.
+    retention_days: int = 90
 
     # --- Auth (NFR-004) ---
     jwt_algorithm: str = "HS256"
@@ -74,8 +86,9 @@ class Settings(BaseSettings):
 
     # --- CORS (frontend is a separate origin - SRS Sec.1.3.2 assumes a
     # browser client). Vite's default dev port is the local default; set
-    # CORS_ALLOWED_ORIGINS explicitly for staging/prod. ---
-    cors_allowed_origins: tuple[str, ...] = ("http://localhost:5173",)
+    # CORS_ALLOWED_ORIGINS explicitly for staging/prod. https by default
+    # (NFR-004) - matches frontend/nginx.conf serving TLS-only on 5173. ---
+    cors_allowed_origins: tuple[str, ...] = ("https://localhost:5173",)
 
 
 @lru_cache

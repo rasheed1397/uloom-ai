@@ -1,8 +1,9 @@
 import uuid
 
-from sqlalchemy import select
+from pgvector.sqlalchemy import HALFVEC
+from sqlalchemy import cast, select
 
-from app.models.chunk import Chunk
+from app.models.chunk import EMBEDDING_DIM, Chunk
 from app.repositories.base import BaseRepository
 
 
@@ -22,7 +23,16 @@ class ChunkRepository(BaseRepository):
         # FR-005: scoped to documents the requester is authorized to access.
         # Scoping happens in the WHERE clause itself, not as a post-filter
         # (Detailed Design Sec.5.3), to avoid leaking unauthorized-doc existence.
-        distance = Chunk.embedding_vector.cosine_distance(query_vector)
+        #
+        # Cast to halfvec(3072) rather than comparing embedding_vector
+        # directly: the HNSW index (0004 migration) is built on that same
+        # cast expression, since pgvector caps HNSW at 2000 dimensions for
+        # the plain vector type and EMBEDDING_DIM is 3072 - the cast must
+        # match exactly for the planner to use the index instead of a
+        # sequential scan. See the 0004 migration docstring for the full
+        # rationale (this doesn't change what's stored, only how the ANN
+        # index searches it).
+        distance = cast(Chunk.embedding_vector, HALFVEC(EMBEDDING_DIM)).cosine_distance(query_vector)
         stmt = select(Chunk).where(Chunk.document_id.in_(owner_document_ids))
         if max_distance is not None:
             # FR-006: excludes chunks below the configured similarity

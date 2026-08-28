@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -21,6 +22,13 @@ class DocumentRepository(BaseRepository):
 
     async def list_all(self) -> list[Document]:
         result = await self._session.execute(select(Document))
+        return list(result.scalars().all())
+
+    async def list_older_than(self, cutoff: datetime) -> list[Document]:
+        # Sec.10 retention sweep: targeted query rather than list_all() +
+        # Python-side filtering, since this runs platform-wide across every
+        # user's documents.
+        result = await self._session.execute(select(Document).where(Document.created_at < cutoff))
         return list(result.scalars().all())
 
     async def delete(self, document: Document) -> None:

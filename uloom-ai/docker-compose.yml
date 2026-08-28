@@ -20,7 +20,10 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "5173:80"
+      # NFR-004: nginx serves HTTPS only (self-signed) on 443 - see
+      # nginx.conf for why a stray plain-http request is rejected rather
+      # than redirected.
+      - "5173:443"
     depends_on:
       - api
 

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -23,3 +24,16 @@ class ConversationRepository(BaseRepository):
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_older_than(self, cutoff: datetime) -> list[Conversation]:
+        # Sec.10 retention sweep, platform-wide across every user.
+        result = await self._session.execute(
+            select(Conversation).where(Conversation.created_at < cutoff)
+        )
+        return list(result.scalars().all())
+
+    async def delete(self, conversation: Conversation) -> None:
+        # Message rows cascade via Conversation.messages'
+        # cascade="all, delete-orphan" (app/models/conversation.py).
+        await self._session.delete(conversation)
+        await self._session.flush()

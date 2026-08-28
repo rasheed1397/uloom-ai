@@ -72,5 +72,6 @@ async def update_settings_view(
         retrieval_top_k=body.retrieval_top_k,
         chunk_token_size=body.chunk_token_size,
         similarity_threshold=body.similarity_threshold,
+        retention_days=body.retention_days,
     )
     return SettingsOut.model_validate(settings)

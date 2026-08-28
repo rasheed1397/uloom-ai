@@ -382,3 +382,153 @@ on every restart, not just the first one. Deliberately takes a
 internally, so it's unit-testable with a fake the same way every other
 service in this codebase is, rather than needing a real database the way
 `main.py`'s lifespan wiring itself does.
+
+## SRS hardening pass: Sec.5.3, NFR-004, Sec.10, NFR-005/Sec.9, NFR-008, Sec.5.2 (2026-08-28)
+
+Six remaining SRS/Detailed-Design items, worked in priority order. Scope for
+three of them (TLS approach, observability depth, document sharing) was
+confirmed with the user up front rather than guessed: self-signed TLS now
+(not deferred to a production ingress writeup only), structured logs +
+correlation ID only (no Prometheus/tracing yet), and retention-only for
+Sec.10 - document *sharing* ("owner or explicitly shared") is explicitly
+out of scope for this pass, still owner-only access. Sec.5.2's other open
+item, virus/malware scanning on upload, was also explicitly deferred (not
+an SRS requirement, just a design-doc placeholder) - both left as-is.
+
+**1. Detailed Design Sec.5.3 (Vector Service) - pgvector index.** The
+service itself already matched the design doc (authorization scoping in
+the query's `WHERE` clause, not a post-filter). The doc's own "open
+question" - index type/tuning - was unaddressed: no ANN index existed on
+`chunks.embedding_vector` at all, so every similarity search was a full
+sequential scan. Added an HNSW index (0004 migration) - no IVFFlat training
+step needed against a small/empty table at migration time, and better
+recall/speed at query time.
+
+Hit pgvector's real, hard constraint building this: **HNSW (and IVFFlat)
+cap the plain `vector` type at 2000 dimensions**, but `EMBEDDING_DIM`
+(`app/models/chunk.py`) is 3072 (`gemini-embedding-001`'s output size) -
+the first migration attempt failed outright with `ProgramLimitExceededError:
+column cannot have more than 2000 dimensions for hnsw index`. Fixed with
+pgvector's documented workaround: index a `halfvec(3072)` **cast** of the
+column (`CREATE INDEX ... USING hnsw ((embedding_vector::halfvec(3072))
+halfvec_cosine_ops)`) - halfvec lifts HNSW's ceiling to 4000 dimensions at
+half-precision, but only for the index's internal representation; the
+column itself stays full-precision `vector(3072)`, so nothing about
+stored/returned embeddings changes. `ChunkRepository.similarity_search`
+casts the query the same way (`cast(Chunk.embedding_vector,
+HALFVEC(EMBEDDING_DIM)).cosine_distance(...)`) - Postgres only uses an
+expression index when the query's expression matches the indexed one, so
+without this cast the query would silently fall back to a sequential scan
+despite the index existing.
+
+**2. NFR-004 (Security) - HTTPS.** JWT, RBAC, and bcrypt password hashing
+were already in place; nothing enforced HTTPS anywhere (nginx plain 80,
+uvicorn no TLS). Both the `api` and `frontend` containers now generate a
+self-signed cert at startup (`docker-entrypoint.sh` in each, via `openssl
+req -x509 ... -subj "/CN=localhost"` - never baked into the image or
+committed, regenerated per-container) and serve TLS only:
+- `frontend`: nginx listens on 443 only (`frontend/nginx.conf`), with a
+  `Strict-Transport-Security` header. `docker-compose.yml` publishes
+  `5173:443`.
+- `api`: uvicorn gets `--ssl-certfile`/`--ssl-keyfile` in the Dockerfile's
+  `CMD`. Still published as `8000:8000`, now serving https there instead
+  of http. The `HEALTHCHECK` explicitly skips cert verification
+  (`ssl._create_unverified_context()`) since it's checking against our own
+  self-signed cert, not vetting it.
+- Frontend's `API_BASE_URL` default and the backend's
+  `CORS_ALLOWED_ORIGINS` default both moved to `https://`.
+
+Dead-config lesson from this pass: nginx originally also had a `listen 80`
+block that issued a `301` to `https://$host$request_uri`, intended to
+redirect a stray plain-http visit. It never worked and was removed -
+`docker-compose.yml` only publishes host `5173` to the container's `443`
+(never to `80`), so nothing ever reached that block from outside the
+container; a raw http request to `5173` just gets nginx's built-in
+protocol-mismatch rejection (`400 Bad Request`) instead. A working redirect
+would need the http and https listeners reachable at the *same* host port
+number (as on a real deployment's standard 80/443), which this local
+mapping deliberately doesn't do. Verified end-to-end via `curl -sk` against
+both origins, an actual CORS preflight (`OPTIONS` with `Origin:
+https://localhost:5173`) against the api, and the HSTS header - **not**
+via the interactive browser tool, which can't click through a self-signed
+cert's interstitial warning (no visible pane to click "proceed", and it
+refuses to navigate to an untrusted cert at all). A real browser needs a
+one-time manual "proceed anyway" on `https://localhost:8000` and
+`https://localhost:5173` each, the first time.
+
+**3. SRS Section 10 (Data Privacy and Retention) - retention period.**
+Deletion already worked correctly (storage file + DB row, with
+`Document.chunks`/`Conversation.messages` cascading via SQLAlchemy
+relationship `cascade="all, delete-orphan"`). Added the missing piece: a
+default retention period, admin-configurable, per the SRS's explicit
+wording. `system_settings.retention_days` (0005 migration, default 90)
+joins the three existing admin-tunable fields - same
+read-fresh-every-time, no-restart-needed pattern via `PATCH
+/admin/settings`. Enforcement is `app/core/retention.py`'s
+`run_retention_sweep()`, run daily via an `asyncio.create_task` started in
+`main.py`'s `lifespan` (no new scheduler dependency for this) - reads
+`retention_days` from the DB fresh on every sweep, then deletes every
+document and conversation (platform-wide, all users - Section 10 describes
+a default *period*, not a per-user setting) older than that. A failing
+sweep is caught and logged, never crashes the app or blocks the next
+scheduled one (same Sec.9 "failures shall not terminate the application"
+principle applied to this background task, not just AI-provider calls).
+
+**4. NFR-005/SRS Sec.9 (Reliability) - retry + fallback.** The
+degraded-mode paths already existed and matched the SRS wording closely
+(embed failure -> document `FAILED` with a reason; vector-search/chat
+provider outage -> graceful degraded assistant message) - but nothing
+retried a timeout or fell back to a second provider first, as Sec.9
+explicitly specifies. Added `app/services/ai_service/resilient.py`:
+`ResilientChatProvider`/`ResilientEmbeddingProvider` wrap the real
+provider(s) behind the *same* interfaces, so Document/Vector/Conversation
+Service need zero changes - they already catch `ProviderError` for the
+existing degraded-mode paths this wrapper's final re-raise feeds into.
+Only `ProviderTimeoutError` gets a retry (one, after a short backoff) -
+Sec.9 says "AI provider timeout" specifically, and auth/rate-limit/
+content-policy failures aren't transient the same way, so those go
+straight to the fallback (or straight to re-raising, if none configured)
+without wasting a retry on a request that would fail identically again.
+New `AI_CHAT_PROVIDER_FALLBACK`/`AI_EMBEDDING_PROVIDER_FALLBACK` settings
+(both empty by default - matches the current single-vendor-for-v1
+decision, Detailed Design Sec.5.5); blank or equal-to-primary is treated
+as "not configured" in the factory, not a pointless self-fallback call.
+
+**5. NFR-008 (Observability) - structured logs + correlation ID.** Nothing
+existed beyond scattered `logger.info`/`logger.exception` calls. Added
+`app/core/logging_config.py`: a JSON log formatter that pulls a
+correlation ID from a `contextvars.ContextVar` - every existing log call
+site became structured and correlated for free, without touching any of
+them, since the formatter (not the caller) is what reads the ID.
+`CorrelationIdMiddleware` (a `BaseHTTPMiddleware` subclass, registered
+outermost - before `CORSMiddleware` - so it covers everything below it)
+sets that contextvar per-request, reusing an inbound `X-Request-ID` header
+if one's already present (so an ID survives a hop through a real load
+balancer/ingress), and echoes it back in the response header. It also
+covers `DocumentService.process()` even though that runs as a
+`BackgroundTask` scheduled from the upload request: Starlette runs
+background tasks by awaiting them in-place, in the same coroutine/context
+as the request that scheduled them (the same reason `create_upload`'s
+explicit commit was needed - see item 2 in the section above), so the
+contextvar set by the middleware is still active when the background task
+logs, with no extra propagation code needed.
+
+**6. Detailed Design Sec.5.2 (Document Service) - no changes.** Already
+matched the design closely (pluggable chunking, async 202-then-process
+upload flow, status tracking, cascading deletion). Its one open question,
+virus/malware scanning, was explicitly deferred per the scope decision
+above - would need a new ClamAV container dependency, not something to add
+speculatively.
+
+A test-writing lesson from this pass, worth remembering for any future
+background-task test: **a fake `asyncio.sleep` replacement that doesn't
+itself yield to the event loop turns a `while True` retry/poll loop into a
+genuine, unbounded, fully-synchronous infinite loop** - not just "runs
+fast without a real delay". The first version of
+`test_periodic_sweep_survives_a_failing_iteration` did exactly this (an
+`async def` mock with no internal `await`) and starved the
+session-scoped test event loop for 3.5 hours before hitting `MemoryError`
+mid-suite. Fixed by never spinning the loop up as a background task at
+all - the mocked sleep raises `CancelledError` directly on its first call,
+ending the loop deterministically after exactly one iteration, with no
+timing dependency of any kind.

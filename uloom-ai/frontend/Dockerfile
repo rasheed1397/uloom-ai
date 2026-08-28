@@ -17,7 +17,12 @@ COPY . .
 RUN npm run build
 
 FROM nginx:alpine
+# NFR-004: openssl generates the self-signed cert at container start
+# (docker-entrypoint.sh) - not present in the base image.
+RUN apk add --no-cache openssl
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /docker-entrypoint.d/uloom-tls.sh
+RUN chmod +x /docker-entrypoint.d/uloom-tls.sh
 
-EXPOSE 80
+EXPOSE 443
