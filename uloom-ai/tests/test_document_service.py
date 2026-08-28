@@ -18,6 +18,10 @@ class FakeDocumentRepository:
     def __init__(self) -> None:
         self.documents: dict[uuid.UUID, Document] = {}
         self.deleted: list[Document] = []
+        self.commit_count = 0
+
+    async def commit(self) -> None:
+        self.commit_count += 1
 
     async def create(self, document: Document) -> Document:
         if document.id is None:
@@ -143,6 +147,23 @@ async def test_create_upload_persists_document_and_raw_file():
     assert document.status == DocumentStatus.UPLOADED
     assert documents.documents[document.id] is document
     assert storage.saved[str(document.id)] == b"hello"
+    # Regression check: create_upload must commit before returning, so the
+    # row is visible to a concurrent request (e.g. the frontend's list
+    # refresh right after upload) without waiting for process() to finish -
+    # that background task can take real time (a live embedding call).
+    assert documents.commit_count == 1
+
+
+async def test_create_upload_does_not_commit_on_validation_failure():
+    documents = FakeDocumentRepository()
+    service = _make_service(documents=documents)
+
+    with pytest.raises(UnsupportedMimeTypeError):
+        await service.create_upload(
+            owner_id=uuid.uuid4(), filename="a.zip", mime_type="application/zip", content=b"data"
+        )
+
+    assert documents.commit_count == 0
 
 
 async def test_get_by_id_and_list_for_owner_delegate_to_repository():

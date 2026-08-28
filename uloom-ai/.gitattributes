@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers - must stay LF regardless of the
+# checking-out platform's core.autocrlf, or the shebang breaks the container
+# with "/bin/sh^M: bad interpreter".
+*.sh text eol=lf

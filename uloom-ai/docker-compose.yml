@@ -17,6 +17,16 @@ services:
       - ./app:/srv/app/app
       - documents_data:/srv/app/data/documents
 
+  frontend:
+    build: ./frontend
+    ports:
+      # NFR-004: nginx serves HTTPS only (self-signed) on 443 - see
+      # nginx.conf for why a stray plain-http request is rejected rather
+      # than redirected.
+      - "5173:443"
+    depends_on:
+      - api
+
   db:
     image: pgvector/pgvector:pg16
     environment:

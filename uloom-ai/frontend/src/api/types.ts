@@ -59,4 +59,5 @@ export interface Settings {
   retrieval_top_k: number
   chunk_token_size: number
   similarity_threshold: number
+  retention_days: number
 }

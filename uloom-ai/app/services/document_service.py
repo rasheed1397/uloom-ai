@@ -1,7 +1,9 @@
 """Document Service (Detailed Design Sec.5.2). SRS FR-003, FR-004.
 
 Upload returns as soon as the Document row and raw file are persisted
-(status=UPLOADED); parsing/chunking/embedding happens afterward via
+(status=UPLOADED) - `create_upload` commits explicitly before returning, so
+the row is durably visible immediately, not just once processing finishes
+(see the comment there). Parsing/chunking/embedding happens afterward via
 `process()`, run from a background task so the API layer can return 202
 immediately (Detailed Design Sec.5.2 key design point).
 """
@@ -54,7 +56,16 @@ class DocumentService:
         document = await self._documents.create(
             Document(owner_id=owner_id, filename=filename, mime_type=mime_type)
         )
-        await self._storage.save(_storage_key(document.id), content)
+        await self._storage.save(document_storage_key(document.id), content)
+        # Committed here, explicitly, rather than waiting for the ambient
+        # per-request commit (app.core.db.get_session): FastAPI runs
+        # background tasks *before* a yield-dependency's post-yield code, so
+        # without this the row stays invisible to every other DB connection
+        # - including a GET /documents from the same browser session right
+        # after this response - until process() finishes below, which can
+        # take real time (a live embedding call). The frontend polling
+        # /uploading UI assumes the row exists the moment this returns.
+        await self._documents.commit()
         return document
 
     async def get_by_id(self, document_id: uuid.UUID) -> Document | None:
@@ -68,10 +79,14 @@ class DocumentService:
         document FAILED with a visible reason rather than leaving it stuck in
         PROCESSING (SRS Sec.9 degraded-mode handling). Called as a background
         task on the same request-scoped session as create_upload() (see the
-        upload_document router) - it all lands in one transaction, so status
-        transitions from UPLOADED straight to INDEXED/FAILED; PROCESSING is
-        not separately observable, in exchange for atomicity without a task
-        queue.
+        upload_document router), but *after* create_upload's own explicit
+        commit - so this runs in its own, second transaction, committed when
+        the request's session teardown runs (after this background task
+        finishes, per FastAPI's execution order). Status transitions from
+        UPLOADED to PROCESSING to INDEXED/FAILED within that one transaction,
+        so PROCESSING itself is still not separately observable to another
+        connection - only the initial UPLOADED row's visibility was the bug,
+        not this part.
         """
         document = await self._documents.get_by_id(document_id)
         if document is None:
@@ -81,7 +96,7 @@ class DocumentService:
         document.status = DocumentStatus.PROCESSING
 
         try:
-            raw = await self._storage.read(_storage_key(document.id))
+            raw = await self._storage.read(document_storage_key(document.id))
             segments = extract_text(document.mime_type, raw)
             text_chunks = chunk_segments(segments, self._chunk_token_size)
             if text_chunks:
@@ -109,9 +124,9 @@ class DocumentService:
             document.status_detail = str(exc)
 
     async def delete(self, document: Document) -> None:
-        await self._storage.delete(_storage_key(document.id))
+        await self._storage.delete(document_storage_key(document.id))
         await self._documents.delete(document)
 
 
-def _storage_key(document_id: uuid.UUID) -> str:
+def document_storage_key(document_id: uuid.UUID) -> str:
     return f"{document_id}"

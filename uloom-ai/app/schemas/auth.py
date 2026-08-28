@@ -24,3 +24,11 @@ class UserOut(BaseModel):
     role: str
 
     model_config = {"from_attributes": True}
+
+
+class UpdateProfileRequest(BaseModel):
+    # Deliberately no `role` field: role changes are Administrator-driven
+    # only (FR-002 acceptance criteria), via PATCH /admin/users/{id}. Adding
+    # it here would let a user promote themselves.
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8)

@@ -6,6 +6,7 @@ import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ConversationsPage } from './pages/ConversationsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { LoginPage } from './pages/LoginPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { RegisterPage } from './pages/RegisterPage'
 
 function App() {
@@ -35,6 +36,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ConversationDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
             </ProtectedRoute>
           }
         />

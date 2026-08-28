@@ -15,8 +15,16 @@ class FakeVectorService:
     def __init__(self, chunks: list[Chunk] | None = None, error: Exception | None = None) -> None:
         self.chunks = chunks or []
         self.error = error
+        self.last_similarity_threshold: float | None = None
 
-    async def search(self, query: str, owner_document_ids: list[uuid.UUID], top_k: int) -> list[Chunk]:
+    async def search(
+        self,
+        query: str,
+        owner_document_ids: list[uuid.UUID],
+        top_k: int,
+        similarity_threshold: float | None = None,
+    ) -> list[Chunk]:
+        self.last_similarity_threshold = similarity_threshold
         if self.error:
             raise self.error
         return self.chunks
@@ -79,10 +87,11 @@ def settings() -> Settings:
 async def test_ask_returns_unsupported_message_when_no_chunks_found(settings: Settings):
     messages = FakeMessageRepository()
     chat = FakeChatProvider(content="should not be called")
+    vector_service = FakeVectorService(chunks=[])
     service = ConversationService(
         conversation_repository=None,
         message_repository=messages,
-        vector_service=FakeVectorService(chunks=[]),
+        vector_service=vector_service,
         chat_provider=chat,
         settings=settings,
     )
@@ -97,6 +106,10 @@ async def test_ask_returns_unsupported_message_when_no_chunks_found(settings: Se
     # ask() persists the user's question first, unconditionally, then the
     # answer - so both should be in history even on this degraded path.
     assert len(messages.created) == 2
+    # FR-006: the configured threshold is passed through to VectorService,
+    # which is what excludes below-threshold chunks (an empty list here
+    # already means "nothing similar enough", not just "no documents").
+    assert vector_service.last_similarity_threshold == settings.similarity_threshold
     assert messages.created[0].role == MessageRole.USER
     assert messages.created[0].content == "anything?"
     assert messages.created[1] is answer

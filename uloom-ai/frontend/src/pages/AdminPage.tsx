@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import * as adminApi from '../api/admin'
 import { ApiError } from '../api/client'
 import type { AdminUser, Document, Settings } from '../api/types'
@@ -7,6 +7,13 @@ export function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [settingsForm, setSettingsForm] = useState({
+    retrieval_top_k: '',
+    chunk_token_size: '',
+    similarity_threshold: '',
+    retention_days: '',
+  })
+  const [savingSettings, setSavingSettings] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -19,6 +26,12 @@ export function AdminPage() {
     setUsers(u)
     setDocuments(d)
     setSettings(s)
+    setSettingsForm({
+      retrieval_top_k: String(s.retrieval_top_k),
+      chunk_token_size: String(s.chunk_token_size),
+      similarity_threshold: String(s.similarity_threshold),
+      retention_days: String(s.retention_days),
+    })
   }
 
   useEffect(() => {
@@ -44,6 +57,25 @@ export function AdminPage() {
       await refresh()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to delete document.')
+    }
+  }
+
+  async function handleSaveSettings(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSavingSettings(true)
+    try {
+      await adminApi.updateSettings({
+        retrieval_top_k: Number(settingsForm.retrieval_top_k),
+        chunk_token_size: Number(settingsForm.chunk_token_size),
+        similarity_threshold: Number(settingsForm.similarity_threshold),
+        retention_days: Number(settingsForm.retention_days),
+      })
+      await refresh()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update settings.')
+    } finally {
+      setSavingSettings(false)
     }
   }
 
@@ -115,17 +147,65 @@ export function AdminPage() {
       {settings && (
         <section>
           <h2>Settings</h2>
-          <dl className="settings-list">
-            <dt>Retrieval top-k</dt>
-            <dd>{settings.retrieval_top_k}</dd>
-            <dt>Chunk token size</dt>
-            <dd>{settings.chunk_token_size}</dd>
-            <dt>Similarity threshold</dt>
-            <dd>{settings.similarity_threshold}</dd>
-          </dl>
-          <p className="page-status">
-            Editing these isn't implemented yet on the backend (PATCH /admin/settings is still 501).
-          </p>
+          <form className="settings-form" onSubmit={handleSaveSettings}>
+            <label>
+              Retrieval top-k
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settingsForm.retrieval_top_k}
+                onChange={(e) =>
+                  setSettingsForm((f) => ({ ...f, retrieval_top_k: e.target.value }))
+                }
+                required
+              />
+            </label>
+            <label>
+              Chunk token size
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settingsForm.chunk_token_size}
+                onChange={(e) =>
+                  setSettingsForm((f) => ({ ...f, chunk_token_size: e.target.value }))
+                }
+                required
+              />
+            </label>
+            <label>
+              Similarity threshold
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={settingsForm.similarity_threshold}
+                onChange={(e) =>
+                  setSettingsForm((f) => ({ ...f, similarity_threshold: e.target.value }))
+                }
+                required
+              />
+            </label>
+            <label>
+              Retention period (days)
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settingsForm.retention_days}
+                onChange={(e) =>
+                  setSettingsForm((f) => ({ ...f, retention_days: e.target.value }))
+                }
+                required
+              />
+            </label>
+            <button type="submit" disabled={savingSettings}>
+              {savingSettings ? 'Saving…' : 'Save settings'}
+            </button>
+          </form>
+          <p className="page-status">Takes effect immediately — no deployment needed.</p>
         </section>
       )}
     </div>

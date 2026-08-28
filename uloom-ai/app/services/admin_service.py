@@ -1,14 +1,17 @@
-"""Admin Service (SRS FR-009). Scoped to user and document administration
-for v1 - AI provider credential rotation is deliberately not implemented
-here: doing it safely needs a managed secret store (NFR-004), which this
-codebase doesn't have yet, so bolting ad-hoc credential storage onto this
-service would undermine that requirement rather than satisfy it.
+"""Admin Service (SRS FR-009). Covers user/document administration and
+retrieval/chunking settings tuning. AI provider credential rotation is
+deliberately not implemented here: doing it safely needs a managed secret
+store (NFR-004), which this codebase doesn't have yet, so bolting ad-hoc
+credential storage onto this service would undermine that requirement
+rather than satisfy it.
 """
 import uuid
 
 from app.models.document import Document
+from app.models.system_settings import SystemSettings
 from app.models.user import User, UserRole
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.system_settings_repository import SystemSettingsRepository
 from app.repositories.user_repository import UserRepository
 from app.services.document_service import DocumentService
 
@@ -25,10 +28,12 @@ class AdminService:
         user_repository: UserRepository,
         document_repository: DocumentRepository,
         document_service: DocumentService,
+        system_settings_repository: SystemSettingsRepository,
     ) -> None:
         self._users = user_repository
         self._documents = document_repository
         self._document_service = document_service
+        self._system_settings = system_settings_repository
 
     async def list_users(self) -> list[User]:
         return await self._users.list_all()
@@ -53,3 +58,17 @@ class AdminService:
         if document is None:
             raise DocumentNotFoundError(document_id)
         await self._document_service.delete(document)
+
+    async def get_settings(self) -> SystemSettings:
+        return await self._system_settings.get()
+
+    async def update_settings(
+        self,
+        retrieval_top_k: int | None = None,
+        chunk_token_size: int | None = None,
+        similarity_threshold: float | None = None,
+        retention_days: int | None = None,
+    ) -> SystemSettings:
+        return await self._system_settings.update(
+            retrieval_top_k, chunk_token_size, similarity_threshold, retention_days
+        )
