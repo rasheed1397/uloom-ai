@@ -23,3 +23,7 @@ export function deleteAnyDocument(documentId: string): Promise<void> {
 export function getSettings(): Promise<Settings> {
   return apiRequest<Settings>('/admin/settings')
 }
+
+export function updateSettings(changes: Partial<Settings>): Promise<Settings> {
+  return apiRequest<Settings>('/admin/settings', { method: 'PATCH', body: changes })
+}

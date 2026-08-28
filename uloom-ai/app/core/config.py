@@ -57,9 +57,20 @@ class Settings(BaseSettings):
     )
 
     # --- Admin bootstrap (FR-009 open item: how the first Administrator is
-    # created). Comma-separated emails auto-promoted to ADMIN at registration
-    # time; ongoing role changes go through PATCH /admin/users/{id}. ---
+    # created). Two independent mechanisms:
+    # 1. ADMIN_BOOTSTRAP_EMAILS - comma-separated; auto-promoted to ADMIN
+    #    *when that email registers*. Doesn't create an account by itself -
+    #    if nobody with a matching email ever registers, there's still no
+    #    admin.
+    # 2. DEFAULT_ADMIN_EMAIL/DEFAULT_ADMIN_PASSWORD - actually creates an
+    #    admin account at app startup (see app.core.bootstrap), so one
+    #    exists before anyone has registered at all. Both empty by default
+    #    (no account created) - never a hardcoded fallback password.
+    # Ongoing role/active changes for any account go through
+    # PATCH /admin/users/{id} either way.
     admin_bootstrap_emails: str = ""
+    default_admin_email: str = ""
+    default_admin_password: str = ""
 
     # --- CORS (frontend is a separate origin - SRS Sec.1.3.2 assumes a
     # browser client). Vite's default dev port is the local default; set

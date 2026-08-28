@@ -11,6 +11,7 @@ from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.message_repository import MessageRepository
+from app.repositories.system_settings_repository import SystemSettingsRepository
 from app.repositories.user_repository import UserRepository
 
 
@@ -110,3 +111,52 @@ async def test_chunk_repository_bulk_create_and_similarity_search(db_session: As
     )
 
     assert results == [closest, near]
+
+
+async def test_chunk_repository_similarity_search_respects_max_distance(db_session: AsyncSession):
+    user = await _make_user(db_session)
+    document = await _make_document(db_session, user.id)
+    repo = ChunkRepository(db_session)
+
+    # Same as above: distance 0 (identical), 1 (orthogonal), 2 (opposite).
+    closest = Chunk(
+        document_id=document.id, content="closest", token_count=1, embedding_vector=_unit_vector(0)
+    )
+    near = Chunk(document_id=document.id, content="near", token_count=1, embedding_vector=_unit_vector(1))
+    far = Chunk(
+        document_id=document.id, content="far", token_count=1, embedding_vector=_unit_vector(0, sign=-1.0)
+    )
+    await repo.bulk_create([closest, near, far])
+
+    # FR-006: max_distance=0.5 excludes anything less similar than that,
+    # regardless of top_k - this is what makes an empty result mean "nothing
+    # similar enough" rather than just "fewer than top_k chunks exist".
+    results = await repo.similarity_search(
+        query_vector=_unit_vector(0), owner_document_ids=[document.id], top_k=10, max_distance=0.5
+    )
+
+    assert results == [closest]
+
+
+async def test_system_settings_repository_get_returns_the_seeded_singleton(db_session: AsyncSession):
+    repo = SystemSettingsRepository(db_session)
+
+    settings = await repo.get()
+
+    # Reset to these values by the _clean_db fixture before every test, not
+    # re-created - the singleton row (id=1) is seeded once by migration 0003.
+    assert settings.id == 1
+    assert settings.retrieval_top_k == 5
+    assert settings.chunk_token_size == 512
+    assert settings.similarity_threshold == 0.7
+
+
+async def test_system_settings_repository_update_changes_only_given_fields(db_session: AsyncSession):
+    repo = SystemSettingsRepository(db_session)
+
+    updated = await repo.update(retrieval_top_k=10)
+
+    assert updated.retrieval_top_k == 10
+    assert updated.chunk_token_size == 512
+    assert updated.similarity_threshold == 0.7
+    assert await repo.get() is updated

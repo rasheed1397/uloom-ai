@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from app.api import deps
 from app.core.config import Settings
 from app.core.security import create_access_token
+from app.models.system_settings import SystemSettings
 from app.models.user import User, UserRole
 
 
@@ -15,6 +16,14 @@ class FakeUserRepository:
 
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return self.users.get(user_id)
+
+
+class FakeSystemSettingsRepository:
+    def __init__(self, settings: SystemSettings) -> None:
+        self.settings = settings
+
+    async def get(self) -> SystemSettings:
+        return self.settings
 
 
 def _make_user(role: UserRole = UserRole.STANDARD, is_active: bool = True) -> User:
@@ -33,6 +42,7 @@ def test_repository_wrapper_dependencies_construct_repositories():
     assert deps.get_chunk_repository(session)._session is session
     assert deps.get_conversation_repository(session)._session is session
     assert deps.get_message_repository(session)._session is session
+    assert deps.get_system_settings_repository(session)._session is session
 
 
 def test_get_auth_service_wraps_repository():
@@ -40,6 +50,22 @@ def test_get_auth_service_wraps_repository():
     users = deps.get_user_repository(session)
     service = deps.get_auth_service(users, Settings())
     assert service._users is users
+
+
+async def test_get_effective_settings_overrides_only_the_admin_tunable_fields():
+    static_settings = Settings(gemini_api_key="static-secret-should-be-kept")
+    db_settings = SystemSettings(
+        id=1, retrieval_top_k=99, chunk_token_size=1000, similarity_threshold=0.42
+    )
+    repo = FakeSystemSettingsRepository(db_settings)
+
+    effective = await deps.get_effective_settings(static_settings, repo)
+
+    assert effective.retrieval_top_k == 99
+    assert effective.chunk_token_size == 1000
+    assert effective.similarity_threshold == 0.42
+    # Everything else (secrets, provider config, ...) is untouched.
+    assert effective.gemini_api_key == "static-secret-should-be-kept"
 
 
 async def test_get_current_user_returns_user_for_valid_token():
